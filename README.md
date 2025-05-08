@@ -7,7 +7,7 @@
 
 Download the basic files
 ```  
-git clone https://github.com/GaoXieQing/ems120.git
+git clone https://https://github.com/jielab/ems120.git
 cd ems120
 ``` 
 
