@@ -20,26 +20,31 @@ conda activate ems120
 pip install -r requirements.txt
 ``` 
 
-<b>1.3</b> 下载 chinese-macbert-base 的核心文件 [pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main) ，放置于 hfl/chinese-macbert-base/ 文件夹，该文件包含预训练模型的所有参数。
+<b>1.3</b> 下载 chinese-macbert-base 的核心文件 <b>[pytorch_model.bin]</b>(https://huggingface.co/hfl/chinese-macbert-base/tree/main) ，放置于 hfl/chinese-macbert-base 文件夹，该文件包含预训练模型的所有参数。
 <br><br>
 
 
 ## 2. Run 运行
 
-<b>2.1</b>  训练模型，基于2020年的生成后的疾病分类训练的权重放置于 hfl 文件夹
+<b>2.1</b>  数据清洗。
+```
+python data_clean.py
+```
+
+<b>2.2</b>  训练模型，基于2020年的生成后的疾病分类训练的权重文件<b>trained_model.pth></b>，放置于 hfl 文件夹。
 ```
 python train_model.py
 ```
 
-<b>2.2</b>  运行模型，对给定的每年的数据进行疾病分类
+<b>2.3</b>  运行模型，根据<b>性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因</b>，将每条记录进行疾病分类，一共25种分类。
 ```
-python ems-dx.py
+python run_model.py
 ```
 
-<b>2.3</b>  基于“现场地址”，添加急救地址坐标🗺，示例数据 data/test.xlsx.
-点击 [这儿](https://lbsyun.baidu.com)获取密钥，点击[这儿](https://lbsyun.baidu.com/cashier/quota)购买更多. 
+<b>2.4</b>  基于“现场地址”，添加急救地址坐标🗺，示例数据 data/test.xlsx.
+点击 [这儿](https://lbsyun.baidu.com)获取密钥，点击[这儿](https://lbsyun.baidu.com/cashier/quota)购买更多。
 ```
-python ems-map.py 
+python add_xy.py 
 ```
 
 
