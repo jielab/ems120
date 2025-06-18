@@ -38,20 +38,21 @@ python data_clean.py
 <b>2.2</b>  训练模型。
 ```
 python train_model.py
-基于2020年的生成后的疾病分类训练的权重文件 trained_model.pth>，放置于 hfl 文件夹。
+基于2019年数据的前1000条，进行训练，数据位于 data/2019.xlsx。
+生成权重文件 trained_model.pth，放置于 hfl 文件夹。
 ```
 
 <b>2.3</b>  运行模型。
 ```
 python run_model.py
-根据性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因，将每条记录进行疾病分类，一共25种疾病类型。
+根据性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因，进行疾病分类【一共25种疾病类型】。
 ```
 
 <b>2.4</b>  添加坐标🗺
 ```
 python add_xy.py 
-示例数据 data/test.xlsx，基于文件的“现场地址”列。
-点击 [这儿](https://lbsyun.baidu.com)获取密钥，点击[这儿](https://lbsyun.baidu.com/cashier/quota)购买更多。
+示例数据位于 data/test.xlsx，基于文件的“现场地址”列。
+从https://lbsyun.baidu.com获取密钥，从https://lbsyun.baidu.com/cashier/quota购买。
 ```
 
 
