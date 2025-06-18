@@ -1,5 +1,5 @@
 
-## ems120 `v1.0`
+## ems120 🚑 急救120模型
 
 `ems120` ，在 [chinese-macbert-base](https://huggingface.co/hfl/chinese-macbert-base)的基础上，搭建疾病分类模型
 <br><br>
@@ -36,7 +36,7 @@ python train_model.py
 python ems-dx.py
 ```
 
-<b>2.3</b>  基于“现场地址”，添加急救地点🚑的🗺坐标，示例数据 data/test.xlsx.
+<b>2.3</b>  基于“现场地址”，添加急救地址坐标🗺，示例数据 data/test.xlsx.
 点击 [这儿](https://lbsyun.baidu.com)获取密钥，点击[这儿](https://lbsyun.baidu.com/cashier/quota)购买更多. 
 ```
 python ems-map.py 
