@@ -2,6 +2,7 @@
 ## ems120 `v1.0`
 
 `ems120` ，在 [chinese-macbert-base](https://huggingface.co/hfl/chinese-macbert-base)的基础上，搭建疾病分类模型
+<br>
 
 
 ## 1. Install 安装
@@ -20,7 +21,7 @@ pip install -r requirements.txt
 ``` 
 
 <b>1.3</b> 下载 chinese-macbert-base 的核心文件 [pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main) ，放置于 hfl/chinese-macbert-base/ 文件夹，该文件包含预训练模型的所有参数。
-<br>
+<br><br>
 
 
 ## 2. Run 运行
