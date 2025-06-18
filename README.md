@@ -25,7 +25,7 @@ pip install -r requirements.txt
 从 https://huggingface.co/hfl/chinese-macbert-base/tree/main下载，放置于 hfl/chinese-macbert-base 文件夹。
 该文件包含预训练模型的所有参数。
 ```  
-<br><br>
+<br>
 
 
 ## 2. Run 运行
