@@ -3,7 +3,8 @@
 
 `ems120` ，在 [chinese-macbert-base](https://huggingface.co/hfl/chinese-macbert-base)的基础上，搭建疾病分类模型
 
-## 1. Install
+
+## 1. Install 安装
 
 <b>1.1</b> 下载基础包
 ```  
@@ -19,9 +20,10 @@ pip install -r requirements.txt
 ``` 
 
 <b>1.3</b> 下载 chinese-macbert-base 的核心文件 [pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main) ，放置于 hfl/chinese-macbert-base/ 文件夹，该文件包含预训练模型的所有参数。
+<br>
 
 
-## 2. Run
+## 2. Run 运行
 
 <b>2.1</b>  训练模型，基于2020年的生成后的疾病分类训练的权重放置于 hfl 文件夹
 ```
