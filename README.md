@@ -1,36 +1,42 @@
 
 ## ems120 `v1.0`
 
-`ems120` is a command line tool for QC ems data
+`ems120` ，在 chinese-macbert-base的基础上，搭建疾病分类模型
 
-## 1. Getting Started
+## 1. Install
 
-Download the basic files
+1.1 下载基础包
 ```  
 git clone https://https://github.com/jielab/ems120.git
 cd ems120
 ``` 
 
-Install the Python dependencies
+1.2 安装Python依赖包
 ``` 
 conda create -n ems120 python>3.11
 conda activate ems120
 pip install -r requirements.txt
 ``` 
 
-## 2. Download supporting data for test-run
-> - Download [training weight files](https://www.abc.com), put into hfl/ folder.
-> - Download [Macbert pretrained pytorch_model.bin file](https://www.abc.com), put into hfl/chinese-macbert-base/ folder.
-> - Make sure test data has columns such as '现场地址', as shown in data/test.xlsx file.
-> - Obtain Baidu map API key from [here](https://lbsyun.baidu.com). The limit is mapping 5000 addresses per day. More can be bought from [here](https://lbsyun.baidu.com/cashier/quota).
-``` 
-Ev5QMk3??DFRrJ?cfBznvzJnxq1OiSYi
-``` 
+1.3 下载 chinese-macbert-base 的核心文件 pytorch_model.bin 【包含预训练模型的所有参数】，放置于 hfl/chinese-macbert-base/ 文件夹.
 
-## 3. Test-run
+
+## 2. Run
+
+2.1 训练模型，基于2020年的生成后的疾病分类训练的权重放置于 hfl 文件夹
 ```
-python scripts/ems-dx.py
-python scripts/ems-map.py
+python train_model.py
+```
+
+2.2 运行模型，对给定的每年的数据进行疾病分类
+```
+python ems-dx.py
+```
+
+3. 基于“现场地址”，添加急救地点🚑的🗺坐标，示例数据 data/test.xlsx.
+点击 [这儿](https://lbsyun.baidu.com)获取密钥，点击[这儿](https://lbsyun.baidu.com/cashier/quota)购买更多. 
+```
+python ems-map.py 
 ```
 
 
