@@ -32,7 +32,7 @@ pip install -r requirements.txt
 
 <b>2.1</b>  数据清洗。
 ```
-python data_clean.py
+python qc_data.py
 ```
 
 <b>2.2</b>  训练模型。
