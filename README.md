@@ -15,8 +15,8 @@ cd ems120
 
 <b>1.2</b> 安装Python依赖包
 ``` 
-conda create -n ems120 python>3.11
-conda activate ems120
+conda create -n py311 python=3.11
+conda activate py311
 pip install -r requirements.txt
 ``` 
 
