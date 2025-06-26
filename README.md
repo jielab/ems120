@@ -20,10 +20,9 @@ conda activate ems120
 pip install -r requirements.txt
 ``` 
 
-<b>1.3</b> 下载 chinese-macbert-base 的核心文件 <b>[pytorch_model.bin]</b>
+<b>1.3</b> 下载 chinese-macbert-base 的核心文件 <b>[pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main)</b>
 ```  
-从 https://huggingface.co/hfl/chinese-macbert-base/tree/main下载，放置于 hfl/chinese-macbert-base 文件夹。
-该文件包含预训练模型的所有参数。
+放置于 hfl/chinese-macbert-base 文件夹，该文件包含预训练模型的所有参数。
 ```  
 <br>
 
