@@ -9,7 +9,7 @@
 
 <b>1.1</b> 下载基础包
 ```  
-git clone https://https://github.com/jielab/ems120.git
+git clone https://github.com/jielab/ems120.git
 cd ems120
 ``` 
 
