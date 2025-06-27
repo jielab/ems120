@@ -18,6 +18,11 @@ cd ems120
 conda create -n py311 python=3.11
 conda activate py311
 pip install -r requirements.txt
+
+在HPC上面，需要分开运行，如下：
+> pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+> pip install transformers pandas openpyxl
+
 ``` 
 
 <b>1.3</b> 下载 chinese-macbert-base 的核心文件 <b>[pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main)</b>
