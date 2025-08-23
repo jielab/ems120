@@ -1,11 +1,8 @@
 
-## ems120 🚑 急救120模型
-
-`ems120` ，在 [chinese-macbert-base](https://huggingface.co/hfl/chinese-macbert-base)的基础上，搭建疾病分类模型
-<br><br>
+## ems120 🚑
 
 
-## 1. Install 安装
+## 1. Install
 
 <b>1.1</b> Install basic version
 ```  
