@@ -21,10 +21,9 @@ If the above does not work on HPC, install separately:
 > pip install transformers pandas openpyxl
 ``` 
 
-<b>1.3</b> Download chinese-macbert-base modeling parameter files
+<b>1.3</b> Download chinese-macbert-base modeling [parameter file](https://huggingface.co/hfl/chinese-macbert-base/tree/main)
 ```  
-pytorch_model.bin (https://huggingface.co/hfl/chinese-macbert-base/tree/main)
-put under hfl/chinese-macbert-base.
+After "git clone", manually download pytorch_model.bin and put into hfl/chinese-macbert-base/
 ```  
 <br>
 
@@ -33,21 +32,21 @@ put under hfl/chinese-macbert-base.
 
 <b>2.1</b> QC data & Add geographic info
 ```
-python 1a.qc_raw_data.py
-python 1b.get_geo_loc.py # based on column 现场地址, example at data/test.xlsx. 
-# obtain key from https://lbsyun.baidu.com，https://lbsyun.baidu.com/cashier/quota.
+python 1a.qc_data.py
+python 1b.add_geo.py # test data/geo.test.xlsx 
+# obtain key from https://lbsyun.baidu.com[/cashier/quota]
 ```
 
 <b>2.2</b> Add Dx
 ```
-python 2a.train_dx.py # INPUT: 1,000 records from data/2019.xlxs; output: hfl/trained_dx.pth
-python 2b.get_dx.py # based on 性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因
+python 2a.train_dx.py # input: data/dx.test.xlsx; output: param/train_dx.pth
+python 2b.add_dx.py
 ```
 
 <b>2.3</b> Add phone luckiness
 ```
-python 3a.train_phone_sco.py
-python 3b.get_phone_sco.py
+python 3a.train_phone.py # input: data/luck.test.xlsx; output: param/train_luck.pth
+python 3b.add_luck.py
 ```
 
 

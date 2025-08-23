@@ -46,10 +46,9 @@ def collate_fn(data):
     #print('1')
     return input_ids, attention_mask, label1, label2
 
-
 # 配置参数
 CFG = {
-    'fold_num': 5, 'seed': 42, 'model': 'hfl/chinese-macbert-base', #中文预训练模型
+    'fold_num': 5, 'seed': 42, 'model': 'hfl/chinese-macbert-base', # 中文预训练模型
     'max_len': 300, 'epochs': 10, 'train_bs': 32, 'valid_bs': 32, 'lr': 2e-5,
     'num_workers': 4, 'accum_iter': 1, 'weight_decay': 1e-6, 'device': 0,
 }
