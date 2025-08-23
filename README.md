@@ -7,57 +7,52 @@
 
 ## 1. Install 安装
 
-<b>1.1</b> 下载基础包
+<b>1.1</b> Install basic version
 ```  
 git clone https://github.com/jielab/ems120.git
 cd ems120
 ``` 
 
-<b>1.2</b> 安装Python依赖包
+<b>1.2</b> Install Python dependencies
 ``` 
 conda create -n py311 python=3.11
 conda activate py311
 pip install -r requirements.txt
 
-在HPC上面，需要分开运行，如下：
+If the above does not work on HPC, install separately:
 > pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 > pip install transformers pandas openpyxl
 
 ``` 
 
-<b>1.3</b> 下载 chinese-macbert-base 的核心文件 <b>[pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main)</b>
+<b>1.3</b> Download chinese-macbert-base modeling parameter files <b>[pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main)</b>
 ```  
-放置于 hfl/chinese-macbert-base 文件夹，该文件包含预训练模型的所有参数。
+put under hfl/chinese-macbert-base。
 ```  
 <br>
 
 
-## 2. Run 运行
+## 2. Run
 
-<b>2.1</b>  数据清洗。
+<b>2.1</b>  QC & add geographic info
 ```
-python qc_data.py
-```
-
-<b>2.2</b>  训练模型。
-```
-python train_model.py
-基于2019年数据的前1000条，进行训练，数据位于 data/2019.xlsx。
-生成权重文件 trained_model.pth，放置于 hfl 文件夹。
+python 1a.qc_raw_data.py
+python 1b.get_geo_loc.py # based on column 现场地址, example at data/test.xlsx. 
+# obtain key from https://lbsyun.baidu.com，https://lbsyun.baidu.com/cashier/quota.
 ```
 
-<b>2.3</b>  运行模型。
+<b>2.2</b>  Add Dx, based on 性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因
 ```
-python run_model.py
-根据性别、年龄、主诉、现病史、初步诊断、补充诊断、呼救原因，进行疾病分类【一共25种疾病类型】。
+python 2a.train_dx.py # INPUT: 1,000 records from data/2019.xlxs; output: hfl/trained_dx.pth
+python 2b.get_dx.py
 ```
 
-<b>2.4</b>  添加坐标。
+<b>2.3</b>  Add phone luckiness
 ```
-python add_xy.py 
-示例数据位于 data/test.xlsx，基于文件的“现场地址”列。
-从https://lbsyun.baidu.com获取密钥，从https://lbsyun.baidu.com/cashier/quota购买。
+python 3a.train_phone_sco.py
+python 3b.get_phone_sco.py
 ```
+
 
 
 
