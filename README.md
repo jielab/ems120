@@ -31,7 +31,7 @@ put under hfl/chinese-macbert-base.
 
 ## 2. Run
 
-<b>2.1</b> QC & add geographic info
+<b>2.1</b> QC data & Add geographic info
 ```
 python 1a.qc_raw_data.py
 python 1b.get_geo_loc.py # based on column 现场地址, example at data/test.xlsx. 
