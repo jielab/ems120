@@ -19,12 +19,12 @@ pip install -r requirements.txt
 If the above does not work on HPC, install separately:
 > pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 > pip install transformers pandas openpyxl
-
 ``` 
 
-<b>1.3</b> Download chinese-macbert-base modeling parameter files <b>[pytorch_model.bin](https://huggingface.co/hfl/chinese-macbert-base/tree/main)</b>
+<b>1.3</b> Download chinese-macbert-base modeling parameter files
 ```  
-put under hfl/chinese-macbert-base。
+pytorch_model.bin (https://huggingface.co/hfl/chinese-macbert-base/tree/main)
+put under hfl/chinese-macbert-base.
 ```  
 <br>
 
