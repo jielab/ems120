@@ -39,7 +39,7 @@ python 1b.add_geo.py # test data/geo.test.xlsx
 
 <b>2.2</b> Add Dx
 ```
-python 2a.train_dx.py # input: data/dx.test.xlsx; output: param/train_dx.pth
+python 2a.train_dx.py # input: data/dx.test.xlsx; output: param/trained_dx.pth
 python 2b.add_dx.py
 ```
 
