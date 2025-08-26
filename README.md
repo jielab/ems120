@@ -30,25 +30,20 @@ After "git clone", manually download pytorch_model.bin and put into hfl/chinese-
 
 ## 2. Run
 
-<b>2.1</b> QC data & Add geographic info
+<b>2.1</b> Add Dx
 ```
-python 1a.qc_data.py
-python 1b.add_geo.py # test data/geo.test.xlsx 
-# obtain key from https://lbsyun.baidu.com[/cashier/quota]
-```
-
-<b>2.2</b> Add Dx
-```
-python 2a.train_dx.py # input: data/dx.test.xlsx; output: param/trained_dx.pth
-python 2b.add_dx.py
+python 1a.train_dx.py # input: data/dx.test.xlsx; output: param/trained_dx.pth
+python 1b.add_dx.py
 ```
 
-<b>2.3</b> Add phone luckiness
+<b>2.2</b> Add phone luckiness
 ```
-python 3a.train_phone.py # input: data/luck.test.xlsx; output: param/train_luck.pth
-python 3b.add_luck.py
+python 2a.train_phone.py # input: data/luck.test.xlsx; output: param/train_luck.pth
+python 2b.add_luck.py
 ```
 
-
-
-
+<b>2.3</b> Add geographic & housing price
+```
+python 3a.add_geo.py # test data/geo.test.xlsx, key from https://lbsyun.baidu.com[/cashier/quota]
+python 3b.add_house.py
+```
