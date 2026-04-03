@@ -1,409 +1,731 @@
-pacman::p_load(readxl, data.table, tidyverse, lubridate, stringi, patchwork, scales, RColorBrewer) 
-
-dir0 = "D:"
-source(paste0(dir0, '/scripts/f/phe.f.R'))
-replacement <- c('年龄', '性别', '呼救原因', '开始受理时刻', '派车时间', '去程时间', '现场时间', '返程时间', '急救时间') 
-pattern <- c('年龄|病人年龄', '性别|病人性别', '^呼救原因|^呼叫原因', '^开始受理时刻|^开始时刻|^摘机时间', '^派车时间|^受理调度时间', '^去程时间|^去程在途时间', '^现场时间|^现场救援时间|^现场治疗时间|^现场急救时间', '^返程时间|^返程在途时间', '^急救时间|^急救反应时间')
-# 派车时间 = 驶向现场时刻 - 开始受理时刻
-# 去程时间 = 到达现场时刻 - 驶向现场时刻
-# 现场时间 = 病人上车时刻 - 到达现场时刻
-# 返程时间 = 到达医院时刻 - 病人上车时刻
-# 急救时间 = ++++
-dir.dat <- "D:/projects/01大学/02科研论文/ems120"
-years <- 2013:2023
-dxs.cn <- c("创伤-暴力事件", "创伤-交通事故", "创伤-跌倒", "理化中毒", "心脑血管疾病", "呼吸系统疾病", "内分泌系统疾病", "精神病", "创伤-高处坠落", "创伤-其他原因", "泌尿系统疾病", "消化系统疾病", "妇产科", "儿科", "其他-昏迷", "其他-其他症状", "其他-死亡")
-dxs <- c("Violence", "Accident", "Fall", "Poisoning", "CVD", "Respiratory", "Endocrine", "Psychiatric", "Trauma.jump", "Trauma.other", "Urinary", "Digestive", "Ob/Gyn", "Pediatrics", "Coma", "Other", "Death")
-dxs.vip <- dxs[1:8]; dxs.vip.color <- c("purple", "orange", "darkblue", "brown", "red", "green", "brown", "pink")
-names(dxs.vip.color) <- dxs.vip; dxs.vip4 <- dxs.vip[5:8]; dxs.vip4.color <- dxs.vip.color[5:8]
+dir0 <- ifelse(Sys.info()[["sysname"]] == "Windows", "D:/", "/work/sph-huangj")
+source(file.path(dir0, "scripts", "f", "0conf_ML.R"))
+setwd(file.path(dir0, "analysis", "ems120"))
+pacman::p_load(readxl, writexl, data.table, tidyverse, scales, RColorBrewer, reticulate, lubridate, patchwork, zoo, broom, forcats, circlize) 
+invisible(lapply(c("phe.f.R", "plot.f.R"), \(f) source(file.path(dir0, "scripts", "f", f))))
+dir.dat <- "D:/data/ems120"
+years <- 2013:2024
+vars.basic <- c("电话", "地址", "地址类型", "开始受理时刻", "派车时间", "去程时间", "现场时间", "返程时间", "急救时间", "疾病类型", "接车地址经度", "接车地址纬度")
+vars.basic.alias <- c("^病人电话号码|^联系电话.1|^联系电话", "^接车地址$|^接车地点$|^现场地址$", "地址类型",
+	"^开始受理时刻|^开始时刻|^摘机时刻|^收到指令时刻", "^派车时间|^受理调度时间", "^去程时间|^去程在途时间",
+	"^现场时间|^现场救援时间|^现场治疗时间|^现场急救时间", "^返程时间|^返程在途时间", "^急救时间|^急救反应时间", "疾病类型", "接车地址经度", "接车地址纬度")
+vars.dxs <- c("性别", "年龄", "呼救原因", "病种判断", "病因", "伤病程度", "症状", "主诉", "病史", "初步诊断", "补充诊断")
+vars.dxs.alias <- c("^性别$|病人性别|患者性别", "^年龄$|病人年龄|患者年龄", "^呼救原因|^呼叫原因", "病种判断", "^病因$|辅助诊断",
+	"伤病程度|病情分级", "^症状$|患者症状", "^主诉$|病情\\(主诉\\)", "^病史$|现病史", "^初步诊断$", "初步诊断2|补充诊断")
+vars <- c(vars.basic, vars.dxs); vars.alias <- c(vars.basic.alias, vars.dxs.alias)
+vars.time <- c("开始受理时刻", "驶向现场时刻", "到达现场时刻", "病人上车时刻", "到达医院时刻")
+dxs <- list(
+	"Traffic" = "创伤-交通事故", "Poison" = "理化中毒",
+	"Trauma" = c("创伤-暴力事件", "创伤-跌倒", "创伤-高处坠落", "创伤-其他原因", "其他-昏迷"),
+	"CVD" = c("其他-胸闷", "神经系统疾病-脑卒中", "神经系统疾病-其他疾病", "心血管系统疾病-其他疾病", "心血管系统疾病-胸痛"),
+	"Respiratory" = "呼吸系统疾病", "Mental" = "精神病", "NCD-Other" = c("泌尿系统疾病", "消化系统疾病", "内分泌系统疾病"),
+	"Other" = c("妇产科", "儿科", "其他-其他症状"), "Death" = "其他-死亡"
+)
+dxs.raw <- unlist(dxs, use.names = FALSE)
+dxs.grp <- setdiff(names(dxs), "Other") 
+dxs.grp.color <- setNames(rainbow(length(dxs.grp), s = 0.8, v = 0.85), dxs.grp)
+map_grp <- stack(dxs) %>% setNames(c("dx_raw", "dx_grp"))
+grp_use <- c("low", "high")
+roll3 <- function(x) zoo::rollmean(x, 3, fill = NA, align = "center")
+sig_star <- function(p) dplyr::case_when(p < .0001 ~ "***", p < .001 ~ "**", p < .01 ~ "*", TRUE ~ "")
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 读入数据
+# 🚩 读入数据
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-dat.list0 <- list()
+if (file.exists("dat0.list.rds")) dat0.list <- readRDS("dat0.list.rds")
+
+dat0.list <- list()
 for (year in years) {
-	print(year)
-	dat <- read_excel(paste0(dir.dat, '/120数据/清洗后数据/', year, '.xlsx')) 
-	dat.list0[[as.character(year)]] <- dat
+	cat(sprintf("========== %d ==========\n", year))
+	dat <- read_excel(file.path(dir.dat, "120数据", "清洗后数据", paste0(year, ".xlsx"))); names(dat) <- trimws(names(dat))
+	col_names <- names(dat); new_names <- col_names; missing_vars <- c()
+	for (i in seq_along(vars)) {
+		all_m <- grep(vars.alias[i], col_names, value=TRUE)
+		if (!length(all_m)) missing_vars <- c(missing_vars, vars[i]) else {
+			best_m <- all_m[1]
+			if (length(all_m) > 1) for (p in strsplit(vars.alias[i], "\\|")[[1]]) { m <- grep(p, all_m, value=TRUE); if (length(m)) { best_m <- m[1]; break } }
+			new_names[match(best_m, col_names)] <- vars[i]
+		}
+	}
+	if (length(missing_vars)) cat(sprintf("-> 警告：%d年缺 '%s'\n", year, paste(missing_vars, collapse="' 和 '")))
+	names(dat) <- new_names
+	dat <- dat %>% filter(!is.na(电话), !is.na(性别), !if_all(c(主诉, 病史, 初步诊断, 补充诊断), is.na)) %>% mutate( # 🏮
+		across(any_of(vars.time), \(x) ymd_hms(trimws(x))),
+		派车时间 = if ("派车时间" %in% names(.)) as.numeric(派车时间) else if (all(c("驶向现场时刻","开始受理时刻") %in% names(.))) as.numeric(驶向现场时刻 - 开始受理时刻, units="secs") else NA_real_,
+		去程时间 = if ("去程时间" %in% names(.)) as.numeric(去程时间) else if (all(c("到达现场时刻","驶向现场时刻") %in% names(.))) as.numeric(到达现场时刻 - 驶向现场时刻, units="secs") else NA_real_,
+		现场时间 = if ("现场时间" %in% names(.)) as.numeric(现场时间) else if (all(c("病人上车时刻","到达现场时刻") %in% names(.))) as.numeric(病人上车时刻 - 到达现场时刻, units="secs") else NA_real_,
+		返程时间 = if ("返程时间" %in% names(.)) as.numeric(返程时间) else if (all(c("到达医院时刻","病人上车时刻") %in% names(.))) as.numeric(到达医院时刻 - 病人上车时刻, units="secs") else NA_real_,
+		急救时间 = if ("急救时间" %in% names(.)) as.numeric(急救时间) else if (all(c("派车时间","去程时间","现场时间","返程时间") %in% names(.))) 派车时间 + 去程时间 + 现场时间 + 返程时间 else NA_real_
+	) %>% select(any_of(vars)) %>% mutate(
+		电话 = as.character(sub("^0+", "", 电话)), 电话 = ifelse(nchar(电话) == 11, 电话, NA_character_),
+		phone = ifelse(is.na(电话), NA_character_, substring(电话, 4, 11)),
+		年龄 = as.numeric(gsub("岁$", "", 年龄)), 时刻 = 开始受理时刻, 日期 = as.Date(时刻), hour = hour(时刻)
+	) %>% select(-时刻)
+	dat0.list[[as.character(year)]] <- dat
 }
-sum(map_int(dat.list0, nrow))
-names(dat.list0)[map_lgl(dat.list0, ~ !"年龄" %in% names(.x))] # 没有年龄变量的
-sum(map_int(dat.list0, ~ sum(sum(nchar(.x$联系电话) == 11, na.rm = TRUE)))) # 电话号码不是11位数的
-sapply(dat.list0, function(daf) { daf %>% count(联系电话, sort = TRUE) %>% pull(n) %>% head(50) }) # 🏮
-imap_dfr(dat.list0, ~{ daf <- .x
-	cc <- daf %>% count(联系电话, name = "calls"); n_phones <- sum(cc$calls > 5); n_calls <- sum(cc$calls[cc$calls > 5])
-	tibble(Year = as.integer(.y), repeat_phones = n_phones, repeat_calls = n_calls)
-})
-
-dat.list <- lapply(dat.list0, function(datin) {
-	dat <- datin %>% filter(!is.na(疾病类型), nchar(联系电话) == 11) %>% 
-	group_by(联系电话) %>% filter(n() <= 5) %>% ungroup() %>% # 去掉每年5次以上的
-	mutate(across(where(is.POSIXct), ~ format(.x, "%Y-%m-%d %H:%M:%S"))) # 去掉时区 🏮
-	dup_cols <- grep("^派车时间\\.\\.", names(dat), value = TRUE)
-	if (length(dup_cols) == 2) { dat <- dat %>% rename(`派车时间.raw` = !!sym(dup_cols[1]), `派车时间` = !!sym(dup_cols[2])) }
-	names(dat) <- stringi::stri_replace_all_regex(names(dat), pattern = pattern, replacement = replacement, vectorize_all = FALSE)
-	for(col in c("接车地址经度", "接车地址纬度")) { if(! col %in% names(dat)) dat[[col]] <- NA }
-	dat <- dat %>% dplyr::select(年龄, 性别, 联系电话, 疾病类型, 开始受理时刻, 派车时间, 去程时间, 现场时间, 返程时间, 急救时间, 接车地址经度, 接车地址纬度)
-	dat <- dat %>% mutate(
-		年龄 = as.numeric(年龄), 联系电话 = as.character(联系电话), 
-		时刻 = as_datetime(开始受理时刻), 日期 = as.Date(时刻), 钟点 = format(时刻, "%H:%M:%S"), hour = hour(hms(钟点)),
-		phone = substring(联系电话, 4, 11),
-		疾病类型 = ifelse(疾病类型 %in% c("其他-胸闷", "神经系统疾病-脑卒中", "神经系统疾病-其他疾病", "心血管系统疾病-其他疾病", "心血管系统疾病-胸痛"), "CVD", 
-				 疾病类型),
-		疾病类型 = recode(疾病类型, !!!setNames(dxs, dxs.cn), .default = 疾病类型)
-	) %>% group_by(疾病类型) %>% filter(n() >= 50) %>% ungroup() 
-	for (n in 0:9) {dat[[paste0("phone_n", n)]] <- str_count(dat$phone, as.character(n))}
-	dat <- dat %>% mutate(
-		phone_sco = phone_n8 + phone_n9 *0.75 + phone_n6*0.5 + phone_n1 *0.25,
-		# phone_sco = phone_n8 + phone_n9 + phone_n6 + phone_n1,
-		# phone_sco = phone_n8 + phone_n9 *0.5 + phone_n6 *0.5 + phone_n1 *0.5
-		phone_grp = factor(ifelse(phone_n4 >= 1, "low", ifelse(phone_sco <= quantile(phone_sco, 0.75), "middle", "high")), levels = c("low", "middle", "high"))
-	)
-	dat
-})
-sapply(dat.list, function(daf) table(daf$phone_sco))
+saveRDS(dat0.list, "dat0.list.rds")
+write_xlsx(dat0.list[["2019"]][1:10000, intersect(c(vars.dxs, "疾病类型"), names(dat0.list[["2019"]])), drop=FALSE], "2019.train_dx.xlsx")
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 表1. 基本信息ℹ
+# 🚩 Dx和Phone机器学习🩺
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-show_row <- function(df) { df %>% slice(1) %>% mutate(across(everything(), as.character)) %>% pivot_longer(everything())}
-sum(map_int(dat.list, nrow))
-	sapply(dat.list, show_row, simplify = FALSE) # 🏂
-	sapply(dat.list, function(daf) { daf %>% count(联系电话, sort = TRUE) %>% pull(n) %>% head(50) }) # 🏮
-	sapply(dat.list, function(daf) table(daf$phone_grp))
-	sapply(dat.list, function(daf) quantile(daf$phone_sco, 0.75)) # 🏮
+if (file.exists("dat.list.rds")) dat.list <- readRDS("dat.list.rds")
+if (file.exists("dat1.list.rds")) dat1.list <- readRDS("dat1.list.rds")
 
-the_table <- imap_dfr(dat.list, ~{ daf <- .x
-	n <- nrow(daf); n_uniq <- n_distinct(daf$联系电话); fem_pct <- sum(daf$性别 == "女", na.rm = TRUE)/ n * 100
-	high_n <- sum(daf$phone_grp == "high", na.rm = TRUE); high_pct<- high_n / n * 100
-	low_n <- sum(daf$phone_grp == "low", na.rm = TRUE); low_pct <- low_n / n * 100
-	tibble( Year = as.integer(.y), Age = sprintf("%.1f (%.1f)", mean(daf$年龄, na.rm = TRUE), sd(daf$年龄, na.rm = TRUE)),
-		Female = sprintf("%.1f%%", fem_pct), 
-		N = format(n, big.mark = ","), N_uniq_pct = sprintf("%.2f%%", 100 * n_uniq / n),
+reticulate::source_python("D:/scripts/main/ems120.py")
+dat.list <- list()
+for (year in years) {
+	cat("Processing year:", year, "\n")
+	key <- as.character(year); outfile <- paste0(key, ".xlsx")
+	if (file.exists(outfile)) { dat.list[[key]] <- read_excel(outfile); next }
+	res <- tryCatch({
+		dat <- dat0.list[[key]]
+		py_phone <- eval_phone_batch(dat$phone) # 🐂🐎
+		dat <- dat %>% mutate(phone.sco = as.numeric(unlist(py_phone$sco)), phone.sco.reason = as.character(unlist(py_phone$reason)))
+		dat_py <- dat %>% select(any_of(vars.dxs)) # 不能把datetime列传给python
+		py_dx <- eval_dx_batch(dat_py, data_name = key) # 🐂🐎
+		dat <- dat %>% mutate(
+			疾病分类.关键词 = as.character(unlist(py_dx$kw)), 疾病分类.关键词.理由 = as.character(unlist(py_dx$kw_reason)),
+			疾病分类.ML = as.character(unlist(py_dx$ml)), 疾病分类.ML.理由 = as.character(unlist(py_dx$ml_reason))
+		)
+		write_xlsx(dat, outfile); dat
+	}, error = \(e) { cat("ERROR at year", key, "\n"); print(e); NULL })
+	dat.list[[key]] <- res; rm(res); gc()
+}
+saveRDS(dat.list, "dat.list.rds")
+lapply(dat.list, names)
+for (year in 2014:2021) {
+	tab <- table(dat.list[[as.character(year)]]$疾病类型, dat.list[[as.character(year)]]$疾病分类.ML, useNA = "no") # print(tab)
+	concordance <- sum(diag(tab)) / sum(tab)
+	cat("Year:", year, " | Concordance:", sprintf("%.1f%%", concordance * 100), "\n\n")
+}
+
+dat1.list <- list()
+for (year in years) {
+	year <- as.character(year); dat1 <- dat.list[[year]]
+	if (is.null(dat1) || nrow(dat1)==0) { dat1.list[[year]] <- NULL; next }
+	dat1.list[[year]] <- dat1 %>% add_count(电话, name="n_tel") %>% add_count(疾病分类.关键词, name="n_kw") %>% add_count(疾病分类.ML, name="n_ml") %>%
+		mutate(电话 = ifelse(!is.na(电话) & n_tel > 5, NA_character_, 电话),
+			疾病分类.关键词 = ifelse(!is.na(疾病分类.关键词) & n_kw < 50, NA_character_, trimws(疾病分类.关键词)),
+			疾病分类.ML = ifelse(!is.na(疾病分类.ML) & n_ml < 50, NA_character_, trimws(疾病分类.ML)),
+			phone.luck = case_when(is.na(phone.sco) ~ NA_character_, phone.sco <= 2 ~ "low", phone.sco <= 7 ~ "middle", phone.sco <= 10 ~ "high", TRUE ~ NA_character_),
+			phone.luck = factor(phone.luck, levels=c("low", "middle", "high")),
+			dx_raw = trimws(疾病分类.ML)
+		) %>% left_join(map_grp, by = "dx_raw") %>% select(-n_tel, -n_kw, -n_ml)
+}
+saveRDS(dat1.list, "dat1.list.rds")
+lapply(dat1.list, function(dat) table(dat$dx_grp, useNA = "ifany"))
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 表1 🦋
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+the_table <- imap_dfr(dat1.list, ~{
+	dat1 <- .x
+	if (is.null(dat1) || nrow(dat1) == 0) return(tibble())
+	n <- nrow(dat1); n_uniq <- n_distinct(dat1$电话, na.rm = TRUE)
+	fem_n <- sum(dat1$性别 == "女", na.rm = TRUE); fem_pct <- fem_n / n * 100
+	low_n <- sum(dat1$phone.luck == "low", na.rm = TRUE); low_pct <- low_n / n * 100
+	high_n <- sum(dat1$phone.luck == "high", na.rm = TRUE); high_pct <- high_n / n * 100
+	tibble(
+		Year = as.integer(.y),
+		N = format(n, big.mark = ","), N_uniq = format(n_uniq, big.mark = ","), N_uniq_pct = sprintf("%.2f%%", 100 * n_uniq / n),
+		Age = sprintf("%.1f (%.1f)", mean(dat1$年龄, na.rm = TRUE), sd(dat1$年龄, na.rm = TRUE)),
+		Female = sprintf("%s (%.1f%%)", format(fem_n, big.mark = ","), fem_pct),
 		Low = sprintf("%s (%.1f%%)", format(low_n, big.mark = ","), low_pct),
-		High = sprintf("%s (%.1f%%)", format(high_n, big.mark = ","), high_pct) 
+		High = sprintf("%s (%.1f%%)", format(high_n, big.mark = ","), high_pct)
 	)
 })
-the_table; fwrite(the_table, file = "table1.txt", sep = "\t", na = NA, row.names = FALSE, quote = FALSE)
+the_table2 <- the_table %>% rename(
+    `Year` = Year, `EMS calls, N` = N, `Unique caller numbers, N` = N_uniq, `Unique / total, %` = N_uniq_pct,
+    `Age, mean (SD)` = Age, `Female, n (%)` = Female, `Low-luck, n (%)` = Low, `High-luck, n (%)` = High
+)
+the_table2
+write_xlsx(the_table2, path = "Table1.xlsx")
+data.table::fwrite(the_table2, file = "Table1.txt", sep = "\t", quote = FALSE, row.names = FALSE, na = "NA")
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图S1. 📱疾病比例
+# 🚩 图1. 🛏疾病类型每周波动情况
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-dat <- map_dfr(years, ~{
- 	dat.list[[as.character(.x)]] %>% count(疾病类型, name = "count") %>% mutate(year = .x, pct = count/sum(count)) %>% select(year, 疾病类型, count, pct)
-})
-lev2024 <- dat %>% filter(year == 2024) %>% arrange(desc(pct)) %>% pull(疾病类型) # 以2024年的发病率排名
-dat <- dat %>% mutate(疾病类型 = factor(疾病类型, levels = lev2024))
+plot_dx_trend <- function(dat_list, yrs = 2017:2024, dx_var = "dx_grp", dxs = dxs.grp,
+	time.unit = "weekly", y.unit = "auto", var.group = "dxs",
+	cap = 1000, out_png = NA, width = 12, height = 9, dpi = 300) {
+	time.unit <- match.arg(time.unit, c("weekly", "hourly"))
+	y.unit <- if (y.unit == "auto") ifelse(time.unit == "weekly", "count", "pct") else match.arg(y.unit, c("count", "pct"))
+	var.group <- match.arg(var.group, c("dxs", "years"))
+	dat1 <- map_dfr(yrs, \(y){
+		d <- dat_list[[as.character(y)]]
+		if (is.null(d) || nrow(d) == 0) return(tibble())
 
-the_plot <- ggplot(dat, aes(factor(year), count, fill = 疾病类型)) +
-	geom_col(position = "fill", color = "white") +
-	geom_text(aes(label = ifelse(疾病类型 %in% lev2024[(length(lev2024)-3):length(lev2024)], NA_character_, sprintf("%.1f%%", pct * 100))), position = position_fill(vjust = 0.5), size = 3) +
-	scale_fill_hue(name = "Category:") +
-	scale_y_continuous(labels = NULL, expand = c(0, 0)) +
-	labs(x = "Year", y = "Percentage") +
-	theme_minimal(base_size = 12) + theme(axis.title = element_text(face = 'bold'), axis.text = element_text(face = 'bold'))
-the_plot; ggsave("FigS1.png", the_plot, width = 8, height = 10, units = "in", dpi = 600)
+		if (time.unit == "weekly") {
+			d %>% filter(!is.na(.data[[dx_var]]), !is.na(日期), .data[[dx_var]] %in% dxs) %>%
+				transmute(year = y, 日期 = as.Date(日期), dx = factor(as.character(.data[[dx_var]]), levels = dxs)) %>%
+				mutate(week_start = floor_date(日期, "week", week_start = 1), week = isoweek(日期)) %>%
+				group_by(year, week, dx, week_start) %>% summarise(call_count = n(), days = n_distinct(日期), .groups = "drop") %>% filter(days == 7)
+		} else {
+			d %>% filter(!is.na(.data[[dx_var]]), !is.na(hour), .data[[dx_var]] %in% dxs, between(hour, 0, 23)) %>%
+				transmute(year = y, hour = as.integer(hour), dx = factor(as.character(.data[[dx_var]]), levels = dxs)) %>%
+				count(year, dx, hour, name = "call_count") %>% complete(year, dx, hour = 0:23, fill = list(call_count = 0)) %>%
+				group_by(year, dx) %>% mutate(pct = call_count / sum(call_count)) %>% ungroup()
+		}
+	})
+	if (nrow(dat1) == 0) stop("🛑 Fig1: No data after filtering.")
+	if (var.group == "dxs") {
+		plots <- lapply(seq_along(yrs), \(i){
+			dat2 <- dat1 %>% filter(year == yrs[i])
+
+			if (time.unit == "weekly") {
+				dat2 <- dat2 %>% mutate(y = if (y.unit == "count") pmin(call_count, cap) else call_count / sum(call_count, na.rm = TRUE),
+					over = y.unit == "count" & call_count > cap)
+
+				ggplot(dat2, aes(week_start, y, color = dx, group = dx)) +
+					geom_line(linewidth = 0.9) +
+					{ if (y.unit == "count") geom_text(data = filter(dat2, over), aes(label = "*"), vjust = -0.5, show.legend = FALSE) } +
+					scale_color_manual(values = dxs.grp.color[dxs], breaks = dxs, name = NULL, drop = FALSE) +
+					scale_x_date(breaks = date_breaks("3 months"), labels = date_format("%b", locale = "en")) +
+					{ if (y.unit == "count") scale_y_continuous(limits = c(0, cap), breaks = seq(0, cap, cap/4))
+					  else scale_y_continuous(labels = percent_format(accuracy = 1)) } +
+					labs(title = yrs[i], x = NULL, y = if (i %% 2 == 1) ifelse(y.unit == "count", "Number of Calls", "Percentage") else NULL) +
+					theme_minimal(base_size = 11) +
+					theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+			} else {
+				ggplot(dat2, aes(hour, if (y.unit == "count") pmin(call_count, cap) else pct, color = dx, group = dx)) +
+					geom_line(linewidth = 0.9) +
+					geom_point(size = 1.8) +
+					scale_color_manual(values = dxs.grp.color[dxs], breaks = dxs, name = NULL, drop = FALSE) +
+					scale_x_continuous(breaks = seq(0, 22, 2), labels = sprintf("%02d", seq(0, 22, 2))) +
+					{ if (y.unit == "count") scale_y_continuous(limits = c(0, cap), breaks = seq(0, cap, cap/4))
+					  else scale_y_continuous(labels = percent_format(accuracy = 1)) } +
+					labs(title = yrs[i], x = NULL, y = if (i %% 2 == 1) ifelse(y.unit == "count", "Number of Calls", "Percentage") else NULL) +
+					theme_minimal(base_size = 11) +
+					theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(),
+						axis.text.x = element_text(angle = 45, hjust = 1))
+			}
+		})
+		p <- wrap_plots(plots, nrow = ceiling(length(yrs)/2), ncol = 2, guides = "collect") &
+			theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 12)) &
+			guides(color = guide_legend(nrow = 2, byrow = TRUE, override.aes = list(linewidth = 2)))
+	} else {
+		plots <- lapply(seq_along(dxs), \(i){
+			dat2 <- dat1 %>% filter(dx == dxs[i])
+			if (time.unit == "weekly") {
+				dat2 <- dat2 %>% mutate(y = if (y.unit == "count") pmin(call_count, cap) else ave(call_count, year, FUN = \(x) x / sum(x)),
+					over = y.unit == "count" & call_count > cap)
+
+				ggplot(dat2, aes(week, y, color = factor(year), group = year)) +
+					geom_line(linewidth = 0.9) +
+					{ if (y.unit == "count") geom_text(data = filter(dat2, over), aes(label = "*"), vjust = -0.5, show.legend = FALSE) } +
+					scale_color_manual(values = rainbow(length(yrs), s = 0.8, v = 0.85), breaks = yrs, name = NULL, drop = FALSE) +
+					scale_x_continuous(breaks = c(1, 9, 18, 27, 36, 45), labels = c("Jan", "Mar", "May", "Jul", "Sep", "Nov")) +
+					{ if (y.unit == "count") scale_y_continuous(limits = c(0, cap), breaks = seq(0, cap, cap/4))
+					  else scale_y_continuous(labels = percent_format(accuracy = 1)) } +
+					labs(title = dxs[i], x = NULL, y = if (i %% 2 == 1) ifelse(y.unit == "count", "Number of Calls", "Percentage") else NULL) +
+					theme_minimal(base_size = 11) +
+					theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+			} else {
+				ggplot(dat2, aes(hour, if (y.unit == "count") pmin(call_count, cap) else pct, color = factor(year), group = year)) +
+					geom_line(linewidth = 0.9) +
+					geom_point(size = 1.6) +
+					scale_color_manual(values = rainbow(length(yrs), s = 0.8, v = 0.85), breaks = yrs, name = NULL, drop = FALSE) +
+					scale_x_continuous(breaks = seq(0, 22, 2), labels = sprintf("%02d", seq(0, 22, 2))) +
+					{ if (y.unit == "count") scale_y_continuous(limits = c(0, cap), breaks = seq(0, cap, cap/4))
+					  else scale_y_continuous(labels = percent_format(accuracy = 1)) } +
+					labs(title = dxs[i], x = NULL, y = if (i %% 2 == 1) ifelse(y.unit == "count", "Number of Calls", "Percentage") else NULL) +
+					theme_minimal(base_size = 11) +
+					theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(),
+						axis.text.x = element_text(angle = 45, hjust = 1))
+			}
+		})
+		p <- wrap_plots(plots, nrow = ceiling(length(dxs)/2), ncol = 2, guides = "collect") &
+			theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 12)) &
+			guides(color = guide_legend(nrow = 2, byrow = TRUE, override.aes = list(linewidth = 2)))
+	}
+	if (!is.na(out_png)) ggsave(out_png, p, width = width, height = height, dpi = dpi)
+	cat("\n===== Fig1 summary =====\n")
+	if (time.unit == "weekly") {
+		if (y.unit == "count") dat2 <- dat1 %>% group_by(dx) %>% summarise(total_calls = sum(call_count), mean_week = mean(call_count), sd_week = sd(call_count), weeks = n(), .groups = "drop")
+		else dat2 <- dat1 %>% group_by(dx) %>% summarise(mean_pct = mean(if ("pct" %in% names(.)) pct else NA_real_, na.rm = TRUE), .groups = "drop")
+	} else {
+		if (y.unit == "count") dat2 <- dat1 %>% group_by(dx) %>% summarise(total_calls = sum(call_count), mean_hour = mean(call_count), sd_hour = sd(call_count), hours = n(), .groups = "drop")
+		else dat2 <- dat1 %>% group_by(dx) %>% summarise(mean_pct = mean(pct, na.rm = TRUE), max_pct = max(pct, na.rm = TRUE), .groups = "drop")
+	}
+	print(as.data.frame(dat2))
+	invisible(p)
+}
+
+Fig1 <- plot_dx_trend(dat1.list, yrs = 2017:2024, dx_var = "dx_grp", dxs = dxs.grp, time.unit = "weekly", var.group = "dxs", cap = 1000, out_png = "Fig1.png"); Fig1
+#Fig1b <- plot_dx_trend(dat1.list, yrs = 2017:2024, dx_var = "dx_grp", dxs = dxs.grp, time.unit = "weekly", y.unit = "pct", var.group = "years", cap = 1000, out_png = "Fig1.weekly.by_dx.png"); Fig1b
+#Fig1c <- plot_dx_trend(dat1.list, yrs = 2017:2024, dx_var = "dx_grp", dxs = dxs.grp, time.unit = "hourly", y.unit = "pct", var.group = "dxs", cap = 1000, out_png = "Fig1.hourly.by_year.png"); Fig1c
+FigS1 <- plot_dx_trend(dat1.list, yrs = 2017:2024, dx_var = "dx_grp", dxs = dxs.grp, time.unit = "hourly", y.unit = "pct", var.group = "years", cap = 1000, out_png = "FigS1.png"); FigS1
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图1. 🛏疾病类型每周波动情况
+# 🚩 图2. 🕒疾病类型每小时波动情况（circular）
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-years <- 2019:2024
-weekly <- bind_rows( lapply(years,function(y) dat.list[[as.character(y)]] %>% 
-	filter(疾病类型%in%dxs.vip) %>% mutate(week = week(日期)) %>% group_by(year = y,week,disease = 疾病类型) %>%
-	summarise(call_count = n(),days = n_distinct(as.Date(日期)),.groups = "drop") %>% filter(days == 7) %>%
-	mutate(week_start = as.Date(paste0(year,"-01-01")) + weeks(week-1))
-))
-
-plots <- lapply(seq_along(years),function(i){
-	daf <- weekly %>% filter(year == years[i]) %>% mutate(call_capped = pmin(call_count,1000), over = call_count>1000)
-	ggplot(daf,aes(week_start, call_capped, color = disease, linetype = disease, size = disease))+
-	geom_line() + geom_text(data = daf %>% filter(over),aes(label = "*"), vjust = -0.5, show.legend = FALSE)+
-	scale_color_manual(values = setNames(dxs.vip.color, dxs.vip)) +
-	scale_linetype_manual(values = setNames(c(rep("dotted",4), rep("solid",4)), dxs.vip)) +
-	scale_size_manual(values = setNames(c(rep(1.5, 4),rep(1, 4)), dxs.vip), guide = FALSE) +
-	scale_x_date(breaks = date_breaks("3 months"), labels = date_format("%b",locale = "en")) +
-	scale_y_continuous(limits = c(0,1000), breaks = seq(0, 1000, 250))+
-	labs(title = years[i], x = NULL, y = if(i %in% c(1,4)) "Number of Calls" else NULL)+
-	theme_minimal(base_size = 11) + 
-	theme( axis.title = element_text(face = 'bold'), axis.text = element_text(face = 'bold'), 
-		axis.line = element_line()
-	)
-})
-the_plot <- wrap_plots(plots, nrow = 2, ncol = 3, guides = "collect") &
-	scale_color_manual(name = NULL, breaks = dxs.vip, values = setNames(dxs.vip.color, dxs.vip)) &
-	scale_linetype_manual(name = NULL, breaks = dxs.vip, values = setNames(c(rep("dotted", 4), rep("solid", 4)), dxs.vip)) &
-	theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14)) &
-	guides(color = guide_legend( nrow = 1, byrow = TRUE, override.aes = list(size = 6, stroke = 1.5, shape = 18)),
-		linetype = guide_legend( nrow = 1, byrow = TRUE, override.aes = list(linewidth = 2, shape = 2 ))
-	)
-the_plot; ggsave("Fig1.png", the_plot, width = 9, height = 6, dpi = 300)
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图2. 幸运者的🎇发病相对比例
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-years <- 2013:2024
-dat <- lapply(years, function(y) {
-	daf <- dat.list[[as.character(y)]]
-	ph <- prop.table(table(daf$phone_grp))
-	dxp <- prop.table(table(daf$疾病类型, daf$phone_grp), 1)
-	data.frame(year = y, disease = dxs.vip, ph_high = sweep(dxp, 2, as.numeric(ph), "/")[dxs.vip, "high"], ph_low = sweep(dxp, 2, as.numeric(ph), "/")[dxs.vip, "low"])
-}) %>% bind_rows()
-
-cols <- dxs.vip.color; names(cols) <- dxs.vip
-plots <- lapply(seq_along(dxs.vip), function(i) {
-	daf <- subset(dat, disease == dxs.vip[i]) %>% 
-	mutate( ph_low_disp = pmax(ph_low, 0.9), ph_high_disp = pmin(ph_high, 1.1), low_flag = ph_low < 0.9, high_flag = ph_high > 1.1)
-	sy <- i %% 2 == 1
-	ggplot(daf, aes(color = disease)) +
-	geom_segment(aes(x = 1, xend = ph_low_disp, y = year, yend = year), linetype = "dashed", color = "grey80") +
-	geom_segment(aes(x = 1, xend = ph_high_disp, y = year, yend = year), linetype = "dashed") +
-	geom_point(aes(x = ph_low_disp, y = year), color = "grey50", size = 3) +
-	geom_point(aes(x = ph_high_disp, y = year), size = 3) +
-	geom_text(data = subset(daf, low_flag), aes(x = ph_low_disp, y = year), label = "<", hjust = 1.2) +
-	geom_text(data = subset(daf, high_flag), aes(x = ph_high_disp, y = year), label = ">", hjust = 0) +
-	geom_vline(xintercept = 1, color = "black") +
-	scale_color_manual(name = "", values = cols) +
-	scale_x_continuous(limits = c(0.9, 1.1)) +
-	scale_y_continuous(breaks = years, labels = years) +
-	labs( title = dxs.vip[i], x = if (i %in% 5:6) "Relative Risk" else NULL, y = if (sy) "Year" else NULL) +
-	theme_minimal() +
-	theme( axis.text = element_text(face = 'bold'), axis.title = element_text(face = 'bold'), axis.line = element_line(), legend.position = NULL )
-})
-the_plot <- wrap_plots(plots, nrow = 4, ncol = 2, guides = "collect") & theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 12)) 
-the_plot; ggsave("Fig2.png", the_plot, width = 11.2, height = 10, dpi = 600)
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图3. 幸运者的急救🚑时间
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-pacman::p_load(zoo, broom, forcats, circlize)
-vars <- c("派车时间", "去程时间", "现场时间"); vars.en <- c("Dispatch", "Driving", "Onsite")
-high.colors <- c("blue", "purple", "red")
-years <- 2013:2024
-probs <- c(0, 0.01, 0.05, 0.10, 0.50, 0.90, 0.95, 0.99, 1)
-yearly_time <- lapply(vars, function(var) {
-	map_dfr(years, function(y) { 
-		daf <- dat.list[[as.character(y)]] # dat.list.capped[[as.character(y)]]
-		tibble( Variable = var, Year = y, LowMean = mean(daf[[var]][daf$phone_grp == "low"]/60, na.rm = TRUE), HighMean = mean(daf[[var]][daf$phone_grp == "high"]/60, na.rm = TRUE))})
-}) %>% bind_rows()
-
-dxs.list <- dxs.vip[c(1,3,4)]
-hourly_frq <- map_dfr(years, function(y) {
-	dat.list[[ as.character(y) ]] %>% filter(疾病类型 %in% dxs.list, phone_grp %in% c("low","high")) %>% select(疾病类型, phone_grp, hour, 现场时间)
-	}) %>% group_by(疾病类型, phone_grp, hour) %>% summarise(mean_time = mean(现场时间, na.rm = TRUE), .groups = "drop") %>%
-	pivot_wider(names_from = phone_grp, values_from = mean_time, values_fill = list(low = 0, high = 0)) %>% arrange(疾病类型, hour)
-
-plots <- lapply(seq_along(vars), function(i) {
-	var_i <- vars[i]
-	var_data <- filter(yearly_time, Variable == var_i)
-	gm <- mean(var_data$HighMean, na.rm = TRUE)
-	ggplot(var_data, aes(y = Year)) +
-	geom_segment(aes(x = LowMean, xend = HighMean, yend = Year), linetype = "dashed", color = "grey70") +
-	geom_point(aes(x = LowMean), color = "grey50", size = 3) + geom_point(aes(x = HighMean), color = high.colors[i], size = 3, shape = 17) +
-	geom_vline(xintercept = gm, color = high.colors[i], linetype = "dashed") + 
-	labs(title = vars.en[i], x = "Time (mins)", y = if(i == 1) "Year" else NULL) +
-	scale_y_continuous(breaks = years, labels = if(i == 1)years else NULL) + 
-	theme_minimal(base_size = 12) + theme( axis.title = element_text(face = 'bold'), axis.text = element_text(face = 'bold'), axis.line = element_line())	
-})
-the_plot <- wrap_plots(plots, nrow = 1, ncol = 3)
-the_plot; ggsave("Fig3a.png", the_plot, device = "png", width = 10, height = 6, units = "in", dpi = 600)
-
-make_hourly_circle <- function(hourly_frq, dxs.array, high.colors, bg.colors) {
-	circos.clear(); circos.par(start.degree = 90, gap.degree = 0)
-	circos.initialize(factors = "all", xlim = c(0,24))
-	for(i in seq_along(dxs.array)) {
-		dx <- dxs.array[i]; datmp <- filter(hourly_frq, 疾病类型 == dx) %>% arrange(hour) # 必须要🏮
-		circos.trackPlotRegion( 
-			factors = "all", track.index = i, ylim = range(datmp$low, datmp$high), bg.col = bg.colors[i], bg.border = NA, track.height = 0.15,
-			panel.fun = function(...) {circos.lines(datmp$hour, datmp$low, col = "darkgray", lwd = 2); circos.lines(datmp$hour, datmp$high, col = high.colors[i], lwd = 2)}
+ems_hourly <- function(year = "2022", dxs = dxs.grp, dxs.color = dxs.grp.color, var.split = NA, var.split.keep = c("low", "high"),
+	out_png = NA, width = 1200, height = 1200, res = 200, cex.lab = 0.7, sig = TRUE) {
+	year <- as.character(year)
+	dat1 <- bind_rows(lapply(year, \(y){
+		d0 <- dat1.list[[y]]
+		if (is.null(d0) || nrow(d0) == 0) return(tibble())
+		d0 %>% filter(dx_grp %in% dxs, !is.na(hour)) %>%
+			mutate(dx_grp = factor(as.character(dx_grp), levels = dxs), hour = as.integer(hour))
+	}))
+	if (nrow(dat1) == 0) stop("Fig2: No data after filtering.")
+	if (all(is.na(var.split))) {
+		dat2 <- dat1 %>%
+			count(dx_grp, hour, name = "n") %>% complete(dx_grp, hour = 0:23, fill = list(n = 0)) %>%
+			group_by(dx_grp) %>% mutate(N = sum(n), pct = (n + 0.5) / (N + 24 * 0.5)) %>% ungroup()
+		bg_col <- setNames(adjustcolor(dxs.color[dxs], alpha.f = 0.18), dxs)
+		ylim_top <- max(dat2$pct, na.rm = TRUE) * 1.06
+		ylim_bot <- min(dat2$pct, na.rm = TRUE) * 0.94
+	} else {
+		if (!var.split %in% names(dat1)) stop("Fig2: var.split not found in dat1.")
+		lev.ok <- sort(unique(na.omit(as.character(dat1[[var.split]]))))
+		if (!all(var.split.keep %in% lev.ok)) stop(paste0("Fig2: var.split.keep must exist in ", var.split, ". Existing levels: ", paste(lev.ok, collapse = ", ")))
+		if (length(var.split.keep) != 2) stop("Fig2: var.split.keep must have exactly 2 levels.")
+		dat2 <- dat1 %>% filter(.data[[var.split]] %in% var.split.keep) %>%
+			mutate(group = factor(as.character(.data[[var.split]]), levels = var.split.keep)) %>%
+			count(dx_grp, group, hour, name = "n") %>% complete(dx_grp, group, hour = 0:23, fill = list(n = 0)) %>%
+			group_by(dx_grp, group) %>% mutate(N = sum(n), pct = (n + 0.5) / (N + 24 * 0.5)) %>% ungroup() %>%
+			select(dx_grp, group, hour, n, N, pct) %>% pivot_wider(names_from = group, values_from = c(n, N, pct)) %>%
+			mutate(enrich = .data[[paste0("pct_", var.split.keep[2])]] / .data[[paste0("pct_", var.split.keep[1])]],
+				p = pmap_dbl(list(.data[[paste0("n_", var.split.keep[2])]], .data[[paste0("N_", var.split.keep[2])]], .data[[paste0("n_", var.split.keep[1])]], .data[[paste0("N_", var.split.keep[1])]]),
+					\(a, A, b, B) if (A == 0 || B == 0) NA_real_ else fisher.test(matrix(c(a, A-a, b, B-b), 2, byrow = TRUE))$p.value)) %>%
+			group_by(dx_grp) %>% mutate(p_adj = p.adjust(p, "BH"), sig = !is.na(p_adj) & p_adj < 0.05) %>% ungroup()
+		bg_col <- setNames(adjustcolor(dxs.color[dxs], alpha.f = 0.18), dxs)
+		ylim_top <- max(1.25, max(dat2$enrich, na.rm = TRUE))
+		ylim_bot <- min(0.80, 1 / ylim_top)
+	}
+	if (!is.na(out_png)) png(out_png, width = width, height = height, res = res)
+	circos.clear()
+	circos.par(start.degree = 90, gap.degree = 2, cell.padding = c(0,0,0,0), track.margin = c(0.002, 0.002))
+	circos.initialize(factors = "all", xlim = c(0, 24))
+	for (i in seq_along(dxs)) {
+		dx <- dxs[i]
+		dt <- dat2 %>% filter(dx_grp == dx) %>% arrange(hour)
+		circos.trackPlotRegion(
+			factors = "all", track.index = i, ylim = c(ylim_bot, ylim_top),
+			bg.col = bg_col[dx], bg.border = NA, track.height = min(0.16, 0.92 / length(dxs)),
+			panel.fun = function(...) {
+				if (all(is.na(var.split))) {
+					circos.lines(dt$hour, dt$pct, col = dxs.color[dx], lwd = 2.3)
+				} else {
+					circos.lines(c(0, 23), c(1, 1), col = "grey60", lty = 3, lwd = 2)
+					circos.lines(dt$hour, dt$enrich, col = dxs.color[dx], lwd = 2.3)
+					if (sig && any(dt$sig, na.rm = TRUE)) {
+						dd <- dt[dt$sig, ]
+						yy <- pmin(dd$enrich * 1.04, ylim_top * 0.98)
+						circos.text(dd$hour, yy, "*", cex = 0.45, font = 2, col = dxs.color[dx])
+					}
+				}
+				circos.text(23.55, ylim_top * 0.85, dx, facing = "bending.inside", niceFacing = TRUE, adj = c(0.5, 0.5), cex = cex.lab, font = 2, col = dxs.color[dx])
+			}
 		)
 	}
-	circos.axis(h = "top", major.at = 0:23, labels = sprintf("%02d", 0:23), labels.cex = 1.2, minor.ticks = 0, sector.index = "all", track.index = 1)
-	for(i in seq_along(dxs.array)) {circos.text(x = -0.1, y = get.cell.meta.data("ylim", track.index = i)[2] - 88, labels = dxs.array[i], facing = "inside", adj = c(1,0.5), cex = 1.1, font = 2, sector.index = "all", track.index = i)}
-}
-
-high.colors <- dxs.vip4.color
-bg.colors <- c("#FDE0DD", "#E0F3DB", "#D9EDF7", "yellow")
-make_hourly_circle(hourly_frq, dxs.list, high.colors, bg.colors)
-
-
-# Subset dat.list for years 2022 and 2023
-dat.list2 <- dat.list[c("2022", "2023")]
-saveRDS(dat.list2, "dat.list.rds")
-dat.lis <- readRDS("dat.list.rds") 
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图4. 幸运者的疫情管控🛑影响
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-day1 <- as.Date("2022-03-14"); day2 <- as.Date("2022-03-20")
-did_simple = TRUE # DID: difference in difference
-
-dat <- dat.list[["2022"]] %>% mutate(疾病类型 = factor(疾病类型, dxs.vip4)) %>%
-	filter(疾病类型 %in% dxs.vip4, phone_grp != "middle", between(日期, day1 - 7, day2 + 7))
-	daily_cnt <- dat %>% count(疾病类型, phone_grp, 日期, name = "count")
-
-if (did_simple) {
-	did_glm <- function(df, start_date, end_date){
-	sub <- df %>% filter(between(日期, start_date, end_date))
-	fit <- glm(count ~ phone_grp, family = poisson, data = sub)
-	td <- broom::tidy(fit) %>% filter(term == "phone_grphigh")
-	td %>% transmute(OR = exp(estimate), lo = exp(estimate - 1.96*std.error), hi = exp(estimate + 1.96*std.error), p.value = p.value)
+	circos.axis(h = "top", major.at = 0:23, labels = sprintf("%02d", 0:23), labels.cex = 1.1, minor.ticks = 0, sector.index = "all", track.index = 1)
+	if (!is.na(out_png)) dev.off()
+	cat("\n===== Fig2 summary =====\n")
+	if (all(is.na(var.split))) {
+		dat3 <- dat2 %>% group_by(dx_grp) %>% slice_max(order_by = pct, n = 3, with_ties = FALSE) %>% arrange(dx_grp, desc(pct))
+		print(as.data.frame(dat3))
+	} else {
+		dat3 <- dat2 %>% group_by(dx_grp) %>% summarise(
+			enrich_mean = mean(enrich, na.rm = TRUE),
+			enrich_min = min(enrich, na.rm = TRUE),
+			enrich_max = max(enrich, na.rm = TRUE),
+			n_sig_hr = sum(sig, na.rm = TRUE),
+			.groups = "drop"
+		)
+		print(as.data.frame(dat3))
 	}
-} else {
-	did_glm <- function(df, pre_start, pre_end, post_start, post_end) {
-	df_sub <- df %>% filter(between(日期, pre_start, post_end)) %>%
-		mutate( period = if_else(日期 >= post_start & 日期 <= post_end, "post", "pre"), period = factor(period, c("pre","post")))
-		td <- glm(count ~ period * phone_grp, family = poisson, data = df_sub) %>% broom::tidy() %>% filter(term == "periodpost:phone_grphigh") 
-		tibble( OR = exp(td$estimate), lo = exp(td$estimate - 1.96*td$std.error), hi = exp(td$estimate + 1.96*td$std.error), p.value = td$p.value)
-	}
+	print(recordPlot())
+	invisible(as.data.frame(dat2))
 }
-did_calc <- function(daily_cnt, start_date, end_date, dxs) {
-	daily_cnt %>% group_by(疾病类型) %>% nest() %>%
-	#map(data, ~ did_glm(.x, pre_start = day1 - 7, pre_end = day1 - 1, post_start = day1, post_end = day2)))) %>% unnest(res) %>% 
-	mutate(res = map(data, ~ did_glm(.x, start_date, end_date))) %>% unnest(res) %>%
-	mutate(sig = case_when( p.value < .005 ~ "**", p.value < .05 ~ "*", TRUE ~ ""), 疾病类型 = fct_relevel(疾病类型, dxs)) %>% ungroup()
-}
-did.pre <- did_calc(daily_cnt, day1, day2, dxs.vip4)
-did.post <- did_calc(daily_cnt, day2, day2 + 7, dxs.vip4)
-
-daily_plot <- function(title_txt, daf, day1, day2, dxs.color) {
-	ggplot(daf, aes(日期, count)) + geom_vline(xintercept = c(day1, day2),
-	linetype = "dashed", color = "orange", size = 1) + geom_line(data = filter(daf, phone_grp == "low"),
-	aes(group = 1), color = "darkgray", size = 1) + geom_line(data = filter(daf, phone_grp == "high"),
-	aes(color = 疾病类型), size = 1) + scale_color_manual(values = dxs.color) + facet_wrap(~疾病类型, scales = "free_y", ncol = 1) +
-	scale_x_date(labels = date_format("%b %d", locale = "en")) +
-	scale_y_continuous(breaks = scales::pretty_breaks(n = 2), labels = scales::label_number(accuracy = 1)) +
-	labs(title = title_txt, x = NULL, y = NULL) +
-	theme_minimal(base_size = 12) + theme(axis.text = element_text(face = 'bold'), legend.position = "none")
-}
-
-did_plot <- function(title_text, daf, dxs, dxs.color) { ggplot(daf, aes(
-	x = OR, y = factor(疾病类型, levels = rev(dxs)), color = 疾病类型)) + # rev将顺序变成从上到下
-	geom_vline(xintercept = 1, linetype = "dashed") +
-	geom_point(size = 3) + geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.2) +
-	geom_text(aes(label = sig), hjust = -0.5, vjust = 0.5) +
-	scale_color_manual(values = dxs.color) +
-	labs(title = title_text, x = "Rate Ratio (high vs low)", y = NULL) +
-	theme_minimal(base_size = 12) + 
-	theme(axis.text = element_text(face = 'bold'), legend.position = "none", plot.margin = margin(t = 5, r = 20, b = 5, l = 5))
-}
-
-p1 <- daily_plot("A. Daily Calls (March 07 to March 21)", daily_cnt, day1, day2, dxs.vip4.color)
-p2 <- did_plot("B. DID during PHSM (Mar 14–20)", did.pre, dxs.vip4, dxs.vip4.color)
-p3 <- did_plot("C. DID after PHSM (Mar 21–27)", did.post, dxs.vip4, dxs.vip4.color)
-the_plot <- (p1 / plot_spacer() / (p2 | p3)) + plot_layout(heights = c(3,0.1,1), widths = c(2,1))
-the_plot; ggsave("Fig4.png", the_plot, device = "png", width = 10, height = 12, units = "in", dpi = 600)
+dxs1 <- c("CVD", "Respiratory", "Mental", "Poison", "Death")
+Fig2 <- ems_hourly(year = "2020", dxs = dxs1, dxs.color = dxs.grp.color[dxs1], out_png = "Fig2.png"); Fig2
+# Fig2b <- ems_hourly(year = "2024", dxs = dxs1, dxs.color = dxs.grp.color[dxs1], var.split = "phone.luck", var.split.keep = c("low","high"))
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图5. 幸运者的疫情放开影响🎇
+# 🚩 图3. 🎭📱两组人的12年发病频率
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-day1 <- as.Date("2022-11-11"); day2 <- as.Date("2022-12-07")
-dat.1 = dat.list[["2022"]] %>% filter(between(日期, day1 - 10, as.Date("2022-12-31"))) %>% select(疾病类型, 日期, phone_grp)
-dat.2 = dat.list[["2023"]] %>% filter(between(日期, as.Date("2023-01-01"), day2 + 24)) %>% select(疾病类型, 日期, phone_grp)
-dat <- rbind(dat.1, dat.2) %>% mutate(疾病类型 = factor(疾病类型, dxs.vip)) %>%
-	filter(疾病类型 %in% dxs.vip, phone_grp != "middle")
-
-daily_cnt <- dat %>% count(疾病类型, phone_grp, 日期, name = "count")
-did.pre <- did_calc(daily_cnt, day1, day2, dxs.vip)
-did.post <- did_calc(daily_cnt, day2, day2 + 7, dxs.vip)
-
-p1 <- daily_plot("A. Daily Calls (last two monthes of 2022)", daily_cnt, day1, day2, dxs.vip.color)
-p2 <- did_plot("B. DID of the frist open-up", did.pre, dxs.vip, dxs.vip.color)
-p3 <- did_plot("C. DID of the final open-up", did.post, dxs.vip, dxs.vip.color)
-the_plot <- (p1 | (p2 / p3)) + plot_layout(widths = c(2, 1))
-the_plot; ggsave("Fig5.png", the_plot, device = "png", width = 8, height = 8, units = "in", dpi = 600)
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图6. 幸运者的房价🏠
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-pacman::p_load(sf) 
-house <- read_excel(paste0(dir.dat,'/120数据/深圳房价.xlsx')) %>% # 🏠
-	mutate(house.id = 1:n()) %>% rename(house.price = 房价) %>% select(-小区, -地址)
-	house_sf <- st_as_sf(house, coords = c("Lon", "Lat"), crs = 4326) %>% # 4326是经纬度
-	st_transform(house_sf, crs = 3857) %>% mutate(geometry.house = st_geometry(.)) # 3857是meter
-	house_buffer <- st_buffer(house_sf, dist = 1000) # 方圆1千米范围内
-X <- dat.list[["2021"]] %>% select(phone_sco, phone_grp, 疾病类型, 接车地址经度, 接车地址纬度) %>% 
-	mutate(X.id = 1:n())
-	X.sf <- st_as_sf(X, coords = c("接车地址经度", "接车地址纬度"), crs = 4326) %>% st_transform(., crs = 3857) # %>% mutate(geometry.X = st_geometry(.))
-dat0 <- st_intersection(house_buffer, X.sf) # 合并后的 geometry 来自第一个变量
-dat0 <- dat0 %>% group_by(X.id) %>% # 一个人只属于一个house
-	mutate(distance = st_distance(geometry.house, geometry, by_element = TRUE)) %>% 
-	slice_min(order_by = distance) %>% # 离TA最近的那个house
-	st_drop_geometry(.) %>% ungroup() %>% rename(geometry = geometry.house) # 不再需要打电话人的地址了
-	saveRDS(dat, "120.rds")
-	summary(lm(house.price ~ phone_sco, data = dat0))
-
-dat <- dat0 %>% group_by(house.id) %>%
-	summarise(house.price = first(house.price), geometry = first(geometry), phone_sco.mean = round(mean(phone_sco, na.rm = TRUE), 2), .groups = "drop") %>% 
-	st_as_sf() %>% st_transform(crs = 4326) %>% 
-	mutate(lon = st_coordinates(geometry)[,1], lat = st_coordinates(geometry)[,2]) %>% st_drop_geometry(.)
-	fwrite(dat, file = "D:/files/120.txt", append = FALSE, sep = "\t", row.names = FALSE, quote = FALSE)
-	dat$house.price <- log10(dat$house.price); dat$X <- dat$phone_sco.mean
-	
-par(mar = c(5, 4, 4, 5) + 0.1, font.lab = 2, font.axis = 2) 
-	myhist <- hist(dat$house.price, freq = TRUE, main = "", breaks = 10, xlim = c(3,6), xlab = "Housing price", ylab = "")
-	X.avgs <- by(dat$X, cut(dat$house.price, breaks = myhist$breaks), function(x) mean(x, na.rm = TRUE))
-	X.sds <- by(dat$X, cut(dat$house.price, breaks = myhist$breaks), function(x) sd(x, na.rm = TRUE)) 
-	par(new = T)
-	plot(myhist$mids, X.avgs, xlim = range(myhist$breaks), ylim = c(1,3), pch = 16, axes = FALSE, xlab = NA, ylab = NA, cex = 1.2, col = "blue")
-	arrows(myhist$mids, X.avgs-X.sds, myhist$mids, X.avgs+X.sds, angle = 90, code = 3, length = 0.05, col = "darkgray")
-	axis(side = 4); mtext(side = 4, line = 3, "Phone score (mean)", col = "blue")
-
-the_plot <- recordPlot()
-png("Fig6a.png", width = 8, height = 4, units = "in", res = 300); replayPlot(the_plot); dev.off()
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 图S2. 敏感性分析
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-dat.list2 <- map(
-	dat.list, ~ .x %>% mutate(
-		phone_sco.A = phone_n8 + phone_n9 *0.75 + phone_n6 *0.5 + phone_n1 *0.25,
-		phone_sco.B = phone_n8 + phone_n9 + phone_n6 + phone_n1,
-		phone_sco.C = phone_n8 + phone_n9 *0.5 + phone_n6 *0.5 + phone_n1 *0.5
-	) %>% mutate(across(starts_with("phone_sco."), list(
-		q65 = ~ factor(ifelse(phone_n4 >= 1, "low", ifelse(. <= quantile(., .65), "middle", "high")), levels = c("low","middle","high")),
-		q75 = ~ factor(ifelse(phone_n4 >= 1, "low", ifelse(. <= quantile(., .75), "middle", "high")), levels = c("low","middle","high")),
-		q85 = ~ factor(ifelse(phone_n4 >= 1, "low", ifelse(. <= quantile(., .85), "middle", "high")), levels = c("low","middle","high"))), .names = "{.col}_{.fn}")
+cap <- 1.2; xN <- 1.15
+s2 <- bind_rows(lapply(years, \(y) {
+	d0 <- dat1.list[[as.character(y)]]; if (is.null(d0) || nrow(d0) == 0) return(tibble())
+	d0 <- d0 %>% filter(phone.luck %in% grp_use, !is.na(疾病分类.ML)) %>%
+		transmute(group = as.character(phone.luck), dx_raw = trimws(疾病分类.ML)) %>% left_join(map_grp, by = "dx_raw") %>% filter(dx_grp %in% dxs.grp)
+	tg <- table(d0$dx_grp, d0$group); ta <- table(d0$dx_grp); Nl <- sum(tg[, "low"]); Nh <- sum(tg[, "high"]); Tall <- sum(ta)
+	tibble(year = y, disease = dxs.grp,
+		n_low = as.numeric(tg[dxs.grp, "low"]), n_high = as.numeric(tg[dxs.grp, "high"]),
+		N_low = Nl, N_high = Nh,
+		pct_all = as.numeric(ta[dxs.grp]) / Tall, pct_low = as.numeric(tg[dxs.grp, "low"]) / Nl, pct_high = as.numeric(tg[dxs.grp, "high"]) / Nh
+	) %>% mutate(
+		enrich_low = pct_low / pct_all, enrich_high = pct_high / pct_all, RR = pct_high / pct_low,
+		p = purrr::pmap_dbl(list(n_high, N_high, n_low, N_low), \(a, A, b, B) suppressWarnings(chisq.test(matrix(c(a, A - a, b, B - b), 2))$p.value)),
+		sig = !is.na(p) & p < 0.01, lo = pmax(enrich_low,  1 / cap), hi = pmin(enrich_high, cap), lf = enrich_low  < 1 / cap, hf = enrich_high > cap
 	)
-)
+}))
+print(as.data.frame(s2)) # 🏮
 
-df_all <- imap_dfr( dat.list2, ~ .x %>% pivot_longer(
-	cols = matches("^phone_sco\\.[A-Z]+_q\\d+$"), names_to = c("score","quant"),
-	names_pattern = "phone_sco\\.([A-Z]+)_(q\\d+)", values_to = "grp"
-	) %>% count(year = .y, score, quant, grp) %>%
-	group_by(year, score, quant) %>% mutate(pct = n / sum(n)) %>% ungroup()
-)
-wide <- df_all %>% filter(grp %in% c("low","high")) %>% select(year, score, quant, grp, pct) %>%
-	pivot_wider(names_from = grp, values_from = pct) %>% group_by(score, quant) %>%
-	mutate(k = max(low, na.rm = TRUE) / max(high, na.rm = TRUE), high_scaled = high * k) %>%
-	ungroup() %>% mutate(year = as.integer(year), label = paste0(score, ".", quant))
-panel_labels <- wide %>% distinct(label) %>% pull(label)
-high.colors2 <- setNames(hue_pal()(length(panel_labels)), panel_labels)
-
-plots <- map(panel_labels, function(lbl) {
-	dfp <- filter(wide, label == lbl) %>% mutate(year = as.integer(year))
-	y.lim <- c(0.425, 0.475) # range(c(dfp$low, dfp$high_scaled), na.rm = TRUE)
-	span <- diff(y.lim) * 0.2; ylim20p <- y.lim + c(-span, +span)
-	ggplot(dfp, aes(x = year)) + geom_line(aes(y = low), color = "darkgray", size = 1) +
-	geom_point(aes(y = low), color = "darkgray", size = 3, shape = 21, fill = "white") +
-	geom_line(aes(y = high_scaled), color = high.colors2[lbl], size = 1) +
-	geom_point(aes(y = high_scaled), color = high.colors2[lbl], size = 3, shape = 21, fill = "white") +
-	scale_x_continuous(breaks = 2013:2024, limits = c(2013, 2024)) +
-	coord_cartesian(ylim = ylim20p) + labs(y = lbl, x = NULL) +
-	theme_minimal(base_size = 12) +
-	theme( panel.grid.major = element_line(color = "gray80"), panel.grid.minor = element_blank(), 
-	axis.title.x = element_blank(), axis.text = element_blank(), axis.ticks = element_blank(),
-	axis.title.y = element_text(angle = 0, vjust = 0.5, face = "bold"), legend.position = "none"
-	)
+plots <- lapply(dxs.grp, \(dx) {
+	col <- dxs.grp.color[dx]; d <- s2 %>% filter(disease == dx)
+	ggplot(d, aes(y = year)) + geom_vline(xintercept = 1) +
+		geom_vline(xintercept = xN, linetype = "dashed", color = "grey40", linewidth = 0.6) +
+		geom_segment(aes(x = 1, xend = lo, yend = year), linetype = "dashed", color = "grey70", linewidth = 0.9) +
+		geom_segment(aes(x = 1, xend = hi, yend = year), linetype = "dashed", color = col, linewidth = 0.9) +
+		geom_point(aes(x = lo), color = "grey50", size = 3) + geom_point(aes(x = hi), color = col, size = 3) +
+		geom_text(data = d %>% filter(sig), aes(x = hi, label = "*"), hjust = -0.2, vjust = 0.3, size = 5, fontface = "bold") +
+		geom_text(data = d %>% filter(lf),  aes(x = lo, label = "<"), hjust = 1.2) +
+		geom_text(data = d %>% filter(hf),  aes(x = hi, label = ">"), hjust = 0) +
+	geom_text(aes(x = xN - 0.005, label = n_low), hjust = 1, size = 3.2, fontface = "bold", color = "grey60") +
+	geom_text(aes(x = xN, label = "    "), hjust = 0.5, size = 3.2, fontface = "bold", color = "black") +
+	geom_text(aes(x = xN + 0.005, label = n_high), hjust = 0, size = 3.2, fontface = "bold", color = col)  +  
+	scale_x_continuous(limits = c(0.9, 1.2)) + scale_y_continuous(breaks = years, labels = years) +
+		labs(title = dx, x = NULL, y = NULL) + theme_minimal() +
+		theme(axis.text = element_text(face = "bold"), axis.title = element_text(face = "bold"), axis.line = element_line(), legend.position = "none")
 })
-plots[[length(plots)]] <- plots[[length(plots)]] + theme(axis.text.x = element_text(face = 'bold'), axis.ticks.x = element_line()) + labs(x = "Year")
-the_plot <- wrap_plots(plots, ncol = 1)
-the_plot; ggsave("FigS2.png", the_plot, device = "png", width = 8, height = 8, units = "in", dpi = 600)
+Fig3 <- wrap_plots(plots, nrow = 4, ncol = 2)
+Fig3; ggsave("Fig3.png", Fig3, width = 11.2, height = 10, dpi = 600)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 图4. 急救🚑时间 (Dispatch, Drive, Onsite)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ems_duration <- function(var.time = "Dispatch", years = years, dxs = dxs.grp, var.group = "dxs",
+	var.split = NA, var.split.keep = c("low", "high"), out_png = NA, width = 6, height = 8, dpi = 600) {
+	v.map <- c("Dispatch" = "派车时间", "Driving" = "去程时间", "Onsite" = "现场时间")
+	v0 <- v.map[var.time]
+	dat1 <- bind_rows(lapply(years, \(y){
+		d0 <- dat1.list[[as.character(y)]]
+		if (is.null(d0) || nrow(d0) == 0) return(tibble())
+		d0 %>% filter(dx_grp %in% dxs) %>%
+			transmute(
+				Year = y,
+				dx_grp = factor(as.character(dx_grp), levels = dxs),
+				phone.luck = if ("phone.luck" %in% names(.)) as.character(phone.luck) else NA_character_,
+				X = suppressWarnings(as.numeric(.data[[v0]]) / 60)
+			)
+	}))
+	if (nrow(dat1) == 0) stop("Fig3: No data after filtering.")
+	if (all(is.na(var.split))) {
+		if (var.group == "dxs") {
+			dat2 <- dat1 %>% group_by(Year, dx_grp) %>% summarise(mean = mean(X, na.rm = TRUE), .groups = "drop")
+			p <- ggplot(dat2, aes(x = mean, y = Year, color = dx_grp)) +
+				geom_point(size = 3) +
+				scale_color_manual(values = dxs.grp.color[dxs], name = NULL, drop = FALSE) +
+				scale_y_continuous(breaks = years, labels = years) +
+				labs(title = var.time, x = "Time (mins)", y = "Year") +
+				theme_minimal(base_size = 12) +
+				theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+		} else {
+			dat2 <- dat1 %>% group_by(dx_grp, Year) %>% summarise(mean = mean(X, na.rm = TRUE), .groups = "drop")
+			p <- ggplot(dat2, aes(x = mean, y = fct_rev(dx_grp), color = factor(Year))) +
+				geom_point(size = 3) +
+				scale_color_manual(values = rainbow(length(unique(dat2$Year)), s = 0.8, v = 0.85), name = NULL) +
+				labs(title = var.time, x = "Time (mins)", y = NULL) +
+				theme_minimal(base_size = 12) +
+				theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+		}
+		cat("\n===== Fig3 summary =====\n")
+		print(as.data.frame(dat2))
+	} else {
+		if (!var.split %in% names(dat1)) stop("Fig3: var.split not found in dat1.")
+		lev.ok <- sort(unique(na.omit(as.character(dat1[[var.split]]))))
+		if (!all(var.split.keep %in% lev.ok)) stop(paste0("Fig3: var.split.keep must exist in ", var.split, ". Existing levels: ", paste(lev.ok, collapse = ", ")))
+		if (length(var.split.keep) != 2) stop("Fig3: var.split.keep must have exactly 2 levels.")
+		if (var.group == "dxs") {
+			dat2 <- dat1 %>% filter(.data[[var.split]] %in% var.split.keep) %>%
+				group_by(Year, split = .data[[var.split]]) %>%
+				summarise(mean = mean(X, na.rm = TRUE), .groups = "drop") %>%
+				pivot_wider(names_from = split, values_from = mean)
+			names(dat2)[names(dat2) == var.split.keep[1]] <- "low"
+			names(dat2)[names(dat2) == var.split.keep[2]] <- "high"
+			dat2 <- dat2 %>% mutate(
+				diff = high - low,
+				p = pmap_dbl(list(Year), \(yy){
+					d0 <- dat1 %>% filter(Year == yy, .data[[var.split]] %in% var.split.keep)
+					vl <- d0$X[d0[[var.split]] == var.split.keep[1]]
+					vh <- d0$X[d0[[var.split]] == var.split.keep[2]]
+					suppressWarnings(tryCatch(wilcox.test(vh, vl)$p.value, error = \(e) NA_real_))
+				})
+			) %>% mutate(p_adj = p.adjust(p, "BH"), sig = !is.na(p_adj) & p_adj < 0.01)
+			gm <- mean(dat2$high, na.rm = TRUE); rng <- range(c(dat2$low, dat2$high), na.rm = TRUE); eps <- 0.05 * diff(rng)
+			dd <- dat2 %>% mutate(star_x = ifelse(high >= low, high + eps, low - eps))
+			p <- ggplot(dd, aes(y = Year)) +
+				geom_segment(aes(x = low, xend = high, yend = Year), color = "black", linewidth = 0.5) +
+				geom_point(aes(x = low),  color = "grey50", size = 3) +
+				geom_point(aes(x = high), color = "blue", size = 3, shape = 17) +
+				geom_vline(xintercept = gm, color = "blue", linetype = "dashed", linewidth = 0.9) +
+				geom_text(data = dplyr::filter(dd, sig), aes(x = star_x, label = "*"), fontface = "bold", size = 5, vjust = 0.35) +
+				labs(title = var.time, x = "Time (mins)", y = "Year") +
+				scale_y_continuous(breaks = years, labels = years) +
+				theme_minimal(base_size = 12) +
+				theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+		} else {
+			dat2 <- dat1 %>% filter(.data[[var.split]] %in% var.split.keep, dx_grp %in% dxs) %>%
+				group_by(dx_grp, split = .data[[var.split]]) %>%
+				summarise(mean = mean(X, na.rm = TRUE), .groups = "drop") %>%
+				pivot_wider(names_from = split, values_from = mean)
+			names(dat2)[names(dat2) == var.split.keep[1]] <- "low"
+			names(dat2)[names(dat2) == var.split.keep[2]] <- "high"
+			dat2 <- dat2 %>% mutate(
+				diff = high - low,
+				p = pmap_dbl(list(dx_grp), \(ddx){
+					d0 <- dat1 %>% filter(dx_grp == ddx, .data[[var.split]] %in% var.split.keep)
+					vl <- d0$X[d0[[var.split]] == var.split.keep[1]]
+					vh <- d0$X[d0[[var.split]] == var.split.keep[2]]
+					suppressWarnings(tryCatch(wilcox.test(vh, vl)$p.value, error = \(e) NA_real_))
+				})
+			) %>% mutate(p_adj = p.adjust(p, "BH"), sig = !is.na(p_adj) & p_adj < 0.01)
+			gm <- mean(dat2$high, na.rm = TRUE); rng <- range(c(dat2$low, dat2$high), na.rm = TRUE); eps <- 0.05 * diff(rng)
+			dd <- dat2 %>% mutate(star_x = ifelse(high >= low, high + eps, low - eps))
+			p <- ggplot(dd, aes(y = fct_rev(dx_grp))) +
+				geom_segment(aes(x = low, xend = high, yend = fct_rev(dx_grp)), color = "black", linewidth = 0.5) +
+				geom_point(aes(x = low),  color = "grey50", size = 3) +
+				geom_point(aes(x = high), color = "blue", size = 3, shape = 17) +
+				geom_vline(xintercept = gm, color = "blue", linetype = "dashed", linewidth = 0.9) +
+				geom_text(data = dplyr::filter(dd, sig), aes(x = star_x, label = "*"), fontface = "bold", size = 5, vjust = 0.35) +
+				labs(title = var.time, x = "Time (mins)", y = NULL) +
+				theme_minimal(base_size = 12) +
+				theme(axis.title = element_text(face = "bold"), axis.text = element_text(face = "bold"), axis.line = element_line(), plot.title = element_text(face = "bold"))
+		}
+		cat("\n===== Fig3 summary =====\n")
+		print(as.data.frame(dat2))
+	}
+	if (!is.na(out_png)) ggsave(out_png, p, width = width, height = height, dpi = dpi)
+	p
+}
+
+dxs1 <- dxs.grp # c("CVD", "Respiratory", "Mental", "Death")
+Fig4a <- ems_duration(var.time = "Onsite", years = years, dxs = dxs1, var.group = "dxs", var.split = "phone.luck", var.split.keep = c("low","high"), out_png = "Fig4a.png"); Fig4a
+Fig4b <- ems_duration(var.time = "Onsite", years = years, dxs = dxs1, var.group = "dxs", out_png = "Fig4b.png"); Fig4b
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 图5A. 疫情管控影响 🚫
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+phsm_in <- function(date_begin = as.Date("2022-03-14"), date_end = as.Date("2022-03-20"), flank_days = 7,
+	dxs = dxs.grp, var.split = NA, var.split.keep = c("low", "high"),
+	out_png = NA, width = 10, height = 10, dpi = 600) {
+	dat1 <- dat1.list[[as.character(year(date_begin))]] %>%
+		transmute(
+			日期 = as.Date(日期),
+			dx_grp = factor(as.character(dx_grp), levels = dxs),
+			split = if (all(is.na(var.split))) "All" else as.character(.data[[var.split]])
+		) %>%
+		filter(dx_grp %in% dxs, between(日期, date_begin - flank_days, date_end + flank_days))
+	if (!all(is.na(var.split))) dat1 <- dat1 %>% filter(split %in% var.split.keep)
+	dat2 <- dat1 %>% count(dx_grp, split, 日期, name = "count") %>%
+		group_by(dx_grp, split) %>% arrange(日期) %>% mutate(count3 = roll3(count)) %>% ungroup() %>%
+		mutate(
+			period = case_when(日期 < date_begin ~ "pre", between(日期, date_begin, date_end) ~ "during", 日期 > date_end ~ "after"),
+			period = factor(period, c("pre", "during", "after")),
+			col = if (all(is.na(var.split))) as.character(dx_grp) else ifelse(split == var.split.keep[1], "low", as.character(dx_grp))
+		)
+	FigA <- ggplot(dat2, aes(日期, count3, color = col, group = interaction(dx_grp, split))) +
+		geom_vline(xintercept = c(date_begin, date_end), linetype = "dashed", color = "orange", linewidth = 1) +
+		geom_line(linewidth = 1, na.rm = TRUE) +
+		scale_color_manual(values = c("low" = "grey60", dxs.grp.color[dxs]), drop = FALSE) +
+		facet_wrap(~dx_grp, scales = "free_y", ncol = 1) +
+		scale_x_date(labels = date_format("%b %d", locale = "en")) +
+		scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+		labs(title = "A. Daily Calls (3-day avg)", x = NULL, y = NULL) +
+		theme_minimal(base_size = 12) +
+		theme(axis.text = element_text(face = "bold"), axis.title = element_text(face = "bold"), strip.text = element_text(face = "bold"), legend.position = "none", plot.title = element_text(face = "bold"))
+	fit_period4 <- function(df){
+		fit <- glm(count ~ period, family = poisson, data = df)
+		td <- broom::tidy(fit)
+		pick <- function(term_use){
+			x <- td %>% filter(term == term_use)
+			if (nrow(x) == 0) return(tibble(term = term_use, RR = NA_real_, lo = NA_real_, hi = NA_real_, p = NA_real_))
+			tibble(term = term_use, RR = exp(x$estimate), lo = exp(x$estimate - 1.96 * x$std.error), hi = exp(x$estimate + 1.96 * x$std.error), p = x$p.value)
+		}
+		bind_rows(pick("periodduring"), pick("periodafter"))
+	}
+	dat3 <- dat2 %>% group_by(dx_grp, split) %>% nest() %>% mutate(res = map(data, fit_period4)) %>% unnest(res) %>%
+		mutate(
+			phase = if_else(str_detect(term, "periodduring"), "During PHSM", "After PHSM"),
+			sig = sig_star(p),
+			dx_grp = fct_relevel(dx_grp, dxs),
+			col = if (all(is.na(var.split))) as.character(dx_grp) else ifelse(split == var.split.keep[1], "low", as.character(dx_grp))
+		)
+	FigB <- function(tt, d){
+		ggplot(d, aes(x = RR, y = fct_rev(dx_grp), color = col)) +
+			geom_vline(xintercept = 1, linetype = "dashed") +
+			geom_point(size = 3, position = position_dodge(width = 0.4)) +
+			geom_errorbar(aes(xmin = lo, xmax = hi), width = 0.2, orientation = "y", position = position_dodge(width = 0.4)) +
+			geom_text(aes(label = sig), hjust = -0.4, position = position_dodge(width = 0.4)) +
+			scale_color_manual(values = c("low" = "grey60", dxs.grp.color[dxs]), drop = FALSE) +
+			labs(title = tt, x = expression(italic("Rate ratio (vs pre)")), y = NULL) +
+			theme_minimal(base_size = 12) +
+			theme(axis.text = element_text(face = "bold"), axis.title = element_text(face = "bold"), strip.text = element_text(face = "bold"), legend.position = "none", plot.title = element_text(face = "bold"))
+	}
+	FigB1 <- FigB("B. During PHSM", filter(dat3, phase == "During PHSM"))
+	FigB2 <- FigB("C. After PHSM", filter(dat3, phase == "After PHSM"))
+	Fig <- (FigA | (FigB1 / FigB2)) + plot_layout(widths = c(2, 1))
+	if (!is.na(out_png)) ggsave(out_png, Fig, width = width, height = height, dpi = dpi)
+	cat("\n===== Fig5A summary =====\n")
+	print(as.data.frame(dat3 %>% select(dx_grp, split, phase, RR, lo, hi, p, sig) %>% arrange(phase, dx_grp, split)))
+	Fig
+}
+
+Fig5a <- phsm_in(date_begin = as.Date("2022-03-14"), date_end = as.Date("2022-03-20"), flank_days = 7, var.split = "phone.luck", var.split.keep = c("low","high"), out_png = "Fig5a.png"); Fig5a
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 图5B. 疫情放开影响🎇
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+phsm_out <- function(date_half = as.Date("2022-11-11"), date_full = as.Date("2022-12-07"), flank_days = 10,
+	dxs = dxs.grp, var.split = NA, var.split.keep = c("low", "high"),
+	out_png = NA, width = 10, height = 10, dpi = 600) {
+	dat1 <- bind_rows(
+		dat1.list[[as.character(year(date_half))]] %>%
+			transmute(
+				日期 = as.Date(日期),
+				dx_grp = factor(as.character(dx_grp), levels = dxs),
+				split = if (all(is.na(var.split))) "All" else as.character(.data[[var.split]])
+			) %>%
+			filter(dx_grp %in% dxs, between(日期, date_half - flank_days, as.Date("2022-12-31"))),
+		dat1.list[[as.character(year(date_half) + 1)]] %>%
+			transmute(
+				日期 = as.Date(日期),
+				dx_grp = factor(as.character(dx_grp), levels = dxs),
+				split = if (all(is.na(var.split))) "All" else as.character(.data[[var.split]])
+			) %>%
+			filter(dx_grp %in% dxs, between(日期, as.Date("2023-01-01"), date_full + 34))
+	)
+	if (!all(is.na(var.split))) dat1 <- dat1 %>% filter(split %in% var.split.keep)
+	dat2 <- dat1 %>% count(dx_grp, split, 日期, name = "count") %>%
+		group_by(dx_grp, split) %>% arrange(日期) %>% mutate(count3 = roll3(count)) %>% ungroup() %>%
+		mutate(
+			period = case_when(日期 < date_half ~ "pre", 日期 >= date_half & 日期 < date_full ~ "mid", 日期 >= date_full & 日期 <= date_full + 24 ~ "post", TRUE ~ NA_character_),
+			period = factor(period, c("pre", "mid", "post")),
+			col = if (all(is.na(var.split))) as.character(dx_grp) else ifelse(split == var.split.keep[1], "low", as.character(dx_grp))
+		) %>% filter(!is.na(period))
+	FigA <- ggplot(dat2, aes(日期, count3, color = col, group = interaction(dx_grp, split))) +
+		geom_vline(xintercept = c(date_half, date_full), linetype = "dashed", color = "orange", linewidth = 1) +
+		geom_line(linewidth = 1, na.rm = TRUE) +
+		scale_color_manual(values = c("low" = "grey60", dxs.grp.color[dxs]), drop = FALSE) +
+		facet_wrap(~dx_grp, scales = "free_y", ncol = 1) +
+		scale_x_date(labels = date_format("%b %d", locale = "en")) +
+		scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+		labs(title = "A. Daily Calls (3-day avg)", x = NULL, y = NULL) +
+		theme_minimal(base_size = 12) +
+		theme(axis.text = element_text(face = "bold"), axis.title = element_text(face = "bold"), strip.text = element_text(face = "bold"), legend.position = "none", plot.title = element_text(face = "bold"))
+	fit_period5 <- function(df){
+		fit <- glm(count ~ period, family = poisson, data = df)
+		td <- broom::tidy(fit)
+		pick <- function(term_use){
+			x <- td %>% filter(term == term_use)
+			if (nrow(x) == 0) return(tibble(term = term_use, RR = NA_real_, lo = NA_real_, hi = NA_real_, p = NA_real_))
+			tibble(term = term_use, RR = exp(x$estimate), lo = exp(x$estimate - 1.96 * x$std.error), hi = exp(x$estimate + 1.96 * x$std.error), p = x$p.value)
+		}
+		bind_rows(pick("periodmid"), pick("periodpost"))
+	}
+	dat3 <- dat2 %>% group_by(dx_grp, split) %>% nest() %>% mutate(res = map(data, fit_period5)) %>% unnest(res) %>%
+		mutate(
+			phase = if_else(str_detect(term, "periodmid"), "First open-up (mid)", "Final open-up (post)"),
+			sig = sig_star(p),
+			dx_grp = fct_relevel(dx_grp, dxs),
+			col = if (all(is.na(var.split))) as.character(dx_grp) else ifelse(split == var.split.keep[1], "low", as.character(dx_grp))
+		)
+	FigB <- function(tt, d){
+		ggplot(d, aes(x = RR, y = fct_rev(dx_grp), color = col)) +
+			geom_vline(xintercept = 1, linetype = "dashed") +
+			geom_point(size = 3, position = position_dodge(width = 0.4)) +
+			geom_errorbar(aes(xmin = lo, xmax = hi), width = 0.2, orientation = "y", position = position_dodge(width = 0.4)) +
+			geom_text(aes(label = sig), hjust = -0.4, position = position_dodge(width = 0.4)) +
+			scale_color_manual(values = c("low" = "grey60", dxs.grp.color[dxs]), drop = FALSE) +
+			labs(title = tt, x = expression(italic("Rate ratio (vs pre)")), y = NULL) +
+			theme_minimal(base_size = 12) +
+			theme(axis.text = element_text(face = "bold"), axis.title = element_text(face = "bold"), strip.text = element_text(face = "bold"), legend.position = "none", plot.title = element_text(face = "bold"))
+	}
+	FigB1 <- FigB("B. First open-up (mid)", filter(dat3, phase == "First open-up (mid)"))
+	FigB2 <- FigB("C. Final open-up (post)", filter(dat3, phase == "Final open-up (post)"))
+	Fig <- (FigA | (FigB1 / FigB2)) + plot_layout(widths = c(2, 1))
+	if (!is.na(out_png)) ggsave(out_png, Fig, width = width, height = height, dpi = dpi)
+	cat("\n===== Fig5B summary =====\n")
+	print(as.data.frame(dat3 %>% select(dx_grp, split, phase, RR, lo, hi, p, sig) %>% arrange(phase, dx_grp, split)))
+	Fig
+}
+
+Fig5b <- phsm_out(date_half = as.Date("2022-11-11"), date_full = as.Date("2022-12-07"), var.split = "phone.luck", var.split.keep = c("low","high")); Fig5b
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 图6. 幸运者的房价🏠
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pacman::p_load(sf)
+year_use <- "2021"; dist_max_m <- 1000
+house_sf <- read_excel(file.path(dir.dat, "深圳房价.xlsx")) %>%
+	transmute(house.id = row_number(), house.price = as.numeric(房价), Lon = as.numeric(Lon), Lat = as.numeric(Lat)) %>%
+	filter(is.finite(Lon), is.finite(Lat), is.finite(house.price)) %>%
+	st_as_sf(coords = c("Lon", "Lat"), crs = 4326, remove = FALSE) %>% st_transform(3857)
+X_sf <- dat1.list[[year_use]] %>%
+	transmute(X.id = row_number(), 地址类型, phone.sco = as.numeric(phone.sco), phone.luck = as.character(phone.luck), lon = as.numeric(接车地址经度), lat = as.numeric(接车地址纬度)) %>%
+	filter(地址类型 == "住宅区", phone.luck %in% c("low", "high"), is.finite(lon), is.finite(lat)) %>%
+	st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>% st_transform(3857)
+
+idx <- st_nearest_feature(X_sf, house_sf)
+dat0 <- X_sf %>% mutate(house.price = house_sf$house.price[idx], dist_m = as.numeric(st_distance(X_sf, house_sf[idx, ], by_element = TRUE))) %>%
+	st_drop_geometry() %>% mutate(house.price = if_else(dist_m <= dist_max_m, house.price, NA_real_))
+print(as.data.frame(dat0 %>% summarise(
+	N = n(), N_price_ok = sum(is.finite(house.price)), pct_ok = mean(is.finite(house.price)),
+	dist_med = median(dist_m, na.rm = TRUE), dist_p90 = as.numeric(quantile(dist_m, 0.9, na.rm = TRUE))
+)))
+dat_bin <- dat0 %>% filter(is.finite(house.price), is.finite(phone.sco)) %>% mutate(logp = log10(house.price))
+h <- hist(dat_bin$logp, breaks = 10, plot = FALSE)
+s6 <- dat_bin %>% mutate(bin = cut(logp, breaks = h$breaks, include.lowest = TRUE)) %>%
+	group_by(bin) %>% summarise(x  = round(mean(range(logp)), 2), n = n(), y = round(mean(phone.sco), 2), sd = round(sd(phone.sco), 2), .groups = "drop") %>% arrange(x)
+print(as.data.frame(s6)) # 🏮
+
+s6_use <- s6 
+png("Fig6.png", width = 10, height = 5, units = "in", res = 300)
+par(mar = c(5, 4, 3, 5) + 0.2, font.lab = 2, font.axis = 2)
+hh <- hist(dat_bin$logp, breaks = h$breaks, freq = TRUE, col = "grey85", border = "grey40", main = "", xlab = "log10(house price)", ylab = "")
+par(new = TRUE)
+plot(s6_use$x, s6_use$y, ylim = range(c(s6_use$y - s6_use$sd, s6_use$y + s6_use$sd), na.rm = TRUE),
+		 xlim = range(hh$breaks), axes = FALSE, xlab = NA, ylab = NA, pch = 16, cex = 1.2, col = "blue")
+arrows(s6_use$x, s6_use$y - s6_use$sd, s6_use$x, s6_use$y + s6_use$sd, angle = 90, code = 3, length = 0.05, col = "grey60")
+axis(side = 4, font.axis = 2)
+mtext(side = 4, line = 3, "Phone luck score", col = "blue", font = 2)
+dev.off()
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# 🚩 图S2. 原始分类【中文】🎇
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot_dx <- function(dat_list, years, dx_var, dxs.cn,
+	level=c("raw","group"), show=c("percent","count")){
+	level <- match.arg(level); show <- match.arg(show)
+	dxs_raw <- unlist(dxs.cn, use.names=FALSE)
+	map_grp <- stack(dxs.cn); colnames(map_grp) <- c("dx_raw","group")
+	dat <- purrr::map_dfr(years, \(y){
+		d <- dat_list[[as.character(y)]]
+		if(is.null(d)||nrow(d)==0) return(tibble())
+		d0 <- d %>% filter(!is.na(.data[[dx_var]])) %>% transmute(dx_raw=.data[[dx_var]])
+		out <- if(level=="raw")
+			d0 %>% filter(dx_raw%in%dxs_raw) %>% count(group=dx_raw,name="count")
+		else
+			d0 %>% left_join(map_grp,by="dx_raw") %>% filter(!is.na(group)) %>% count(group,name="count")
+		out %>% mutate(year=y,pct=count/sum(count))
+	})
+	lev <- dat %>% filter(year==max(years)) %>% arrange(desc(pct)) %>% pull(group) %>% unique()
+	dat <- dat %>% mutate(group=factor(group,levels=lev), y=if(show=="percent") pct else count)
+
+	ggplot(dat,aes(year,y,color=group,group=group))+
+		geom_line(linewidth=1)+geom_point(size=2)+
+		scale_x_continuous(breaks=years)+
+		(if(show=="percent")
+			scale_y_continuous(labels=scales::percent_format(accuracy=1),expand=c(0,0))
+		 else scale_y_continuous(expand=c(0,0)))+
+		labs(x="Year",y=if(show=="percent")"Percentage" else "Count",color=NULL)+
+		theme_minimal(base_size=12)
+}
+
+FigS2 <- plot_dx(dat1.list, years, "疾病分类.ML", dxs, level="raw",   show="percent") # count
+FigS2; ggsave("FigS2.png", FigS2, width=7, height=4.2, dpi=300)
